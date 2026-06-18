@@ -7,7 +7,16 @@ st.title("💰 FinSense")
 st.caption("Your AI financial decision coach")
 
 if "user_id" not in st.session_state:
-    st.session_state.user_id = "user_" + str(uuid.uuid4())[:8]
+    st.session_state.user_id = None
+
+if not st.session_state.user_id:
+    st.markdown("### Welcome to FinSense 💰")
+    st.markdown("Your personal AI financial coach for smarter money decisions.")
+    name = st.text_input("Enter your name to get started:")
+    if st.button("Start") and name.strip():
+        st.session_state.user_id = "user_" + name.strip().lower().replace(" ", "_")
+        st.rerun()
+    st.stop()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
