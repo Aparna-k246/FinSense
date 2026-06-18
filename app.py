@@ -22,7 +22,7 @@ if prompt := st.chat_input("Ask FinSense anything about your finances..."):
         st.markdown(prompt)
 
     response = requests.post(
-        "http://127.0.0.1:8000/chat",
+        "https://finsense-production-183b.up.railway.app/chat",
         json={
             "user_id": st.session_state.user_id,
             "message": prompt
