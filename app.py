@@ -8,7 +8,7 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-BACKEND_URL = "https://finsense-production-183b.up.railway.app"
+BACKEND_URL = "https://finsense-production-b33a.up.railway.app"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
