@@ -461,3 +461,7 @@ def get_profile(user_id: str):
     if profile:
         return profile
     return {"message": "No profile found"}
+@app.get("/test-tool")
+def test_tool():
+    result = calculate_emi(5000000, 8.5, 240)
+    return result
