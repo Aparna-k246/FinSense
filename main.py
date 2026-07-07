@@ -170,7 +170,7 @@ def execute_tool(tool_name: str, tool_args: dict) -> str:
         result = {"error": f"Unknown tool: {tool_name}"}
     return json.dumps(result)
 
-SYSTEM_PROMPT = SYSTEM_PROMPT = """
+SYSTEM_PROMPT = """
 You are FinSense, an AI financial decision coach 
 built for young Indian professionals in their 20s 
 and 30s who are earning real income but have no 
@@ -231,6 +231,18 @@ any of these, remember them and use them going forward:
 - Existing investments (SIP, FD, PPF etc)
 - Financial goals (house, car, marriage, retirement)
 - Current savings amount
+"""
+TOOLS_INSTRUCTION = """
+IMPORTANT - YOU HAVE ACCESS TO FINANCIAL CALCULATORS:
+You have access to these tools - ALWAYS use them when relevant:
+- calculate_sip_returns: Use for ANY SIP or investment growth question
+- calculate_emi: Use for ANY loan EMI question
+- check_emergency_fund: Use when user mentions savings and expenses
+- calculate_fd_returns: Use for ANY FD or fixed deposit question
+
+NEVER estimate or calculate these manually. ALWAYS call the tool.
+If someone asks about EMI, call calculate_emi. 
+If someone asks about SIP returns, call calculate_sip_returns.
 """
 
 class ChatRequest(BaseModel):
@@ -360,7 +372,7 @@ Do not ask for information you already have.
 
     messages = [{
         "role": "system",
-        "content": SYSTEM_PROMPT + profile_context
+        "content": SYSTEM_PROMPT + profile_context + TOOLS_INSTRUCTION
     }]
 
     for turn in history:
