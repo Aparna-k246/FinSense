@@ -4,6 +4,8 @@ from groq import Groq
 from supabase import create_client
 from dotenv import load_dotenv
 import os
+import json
+import math
 
 load_dotenv()
 
@@ -14,6 +16,159 @@ supabase = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
 )
+
+
+# ============ FINANCIAL TOOLS ============
+
+def calculate_sip_returns(monthly_amount: float, years: int, expected_rate: float) -> dict:
+    """Calculate SIP returns using compound interest formula"""
+    monthly_rate = expected_rate / 100 / 12
+    months = years * 12
+    if monthly_rate == 0:
+        future_value = monthly_amount * months
+    else:
+        future_value = monthly_amount * (((1 + monthly_rate) ** months - 1) / monthly_rate) * (1 + monthly_rate)
+    total_invested = monthly_amount * months
+    total_returns = future_value - total_invested
+    return {
+        "monthly_amount": monthly_amount,
+        "years": years,
+        "expected_rate": expected_rate,
+        "total_invested": round(total_invested, 2),
+        "future_value": round(future_value, 2),
+        "total_returns": round(total_returns, 2)
+    }
+
+def calculate_emi(principal: float, annual_rate: float, tenure_months: int) -> dict:
+    """Calculate EMI for a loan"""
+    monthly_rate = annual_rate / 100 / 12
+    if monthly_rate == 0:
+        emi = principal / tenure_months
+    else:
+        emi = principal * monthly_rate * (1 + monthly_rate) ** tenure_months / ((1 + monthly_rate) ** tenure_months - 1)
+    total_payment = emi * tenure_months
+    total_interest = total_payment - principal
+    return {
+        "principal": principal,
+        "annual_rate": annual_rate,
+        "tenure_months": tenure_months,
+        "emi": round(emi, 2),
+        "total_payment": round(total_payment, 2),
+        "total_interest": round(total_interest, 2)
+    }
+
+def check_emergency_fund(monthly_expenses: float, current_savings: float) -> dict:
+    """Check if emergency fund is adequate"""
+    minimum_required = monthly_expenses * 3
+    recommended = monthly_expenses * 6
+    shortfall = max(0, recommended - current_savings)
+    status = "adequate" if current_savings >= recommended else "insufficient"
+    months_to_build = shortfall / (monthly_expenses * 0.2) if shortfall > 0 else 0
+    return {
+        "monthly_expenses": monthly_expenses,
+        "current_savings": current_savings,
+        "minimum_required": minimum_required,
+        "recommended": recommended,
+        "shortfall": round(shortfall, 2),
+        "status": status,
+        "months_to_build_at_20_percent_savings": round(months_to_build, 1)
+    }
+
+def calculate_fd_returns(principal: float, annual_rate: float, years: int) -> dict:
+    """Calculate FD maturity amount"""
+    # Compounded quarterly
+    quarters = years * 4
+    quarterly_rate = annual_rate / 100 / 4
+    maturity_amount = principal * (1 + quarterly_rate) ** quarters
+    total_interest = maturity_amount - principal
+    return {
+        "principal": principal,
+        "annual_rate": annual_rate,
+        "years": years,
+        "maturity_amount": round(maturity_amount, 2),
+        "total_interest": round(total_interest, 2)
+    }
+
+# Tool definitions for LLM
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_sip_returns",
+            "description": "Calculate the future value of a monthly SIP investment. Use this when the user asks about SIP returns, how much their monthly investment will grow, or wants to know the corpus from regular investing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "monthly_amount": {"type": "number", "description": "Monthly SIP amount in rupees"},
+                    "years": {"type": "integer", "description": "Investment duration in years"},
+                    "expected_rate": {"type": "number", "description": "Expected annual return rate as percentage, use 12 as default for equity mutual funds"}
+                },
+                "required": ["monthly_amount", "years", "expected_rate"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_emi",
+            "description": "Calculate EMI for any loan - home loan, car loan, personal loan. Use this when user asks about loan EMI, whether they can afford a loan, or wants to compare loan options.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal": {"type": "number", "description": "Loan amount in rupees"},
+                    "annual_rate": {"type": "number", "description": "Annual interest rate as percentage"},
+                    "tenure_months": {"type": "integer", "description": "Loan tenure in months"}
+                },
+                "required": ["principal", "annual_rate", "tenure_months"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_emergency_fund",
+            "description": "Check if the user has an adequate emergency fund. Always use this before giving investment advice when you know the user's expenses and savings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "monthly_expenses": {"type": "number", "description": "Total monthly expenses in rupees"},
+                    "current_savings": {"type": "number", "description": "Current savings amount in rupees"}
+                },
+                "required": ["monthly_expenses", "current_savings"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_fd_returns",
+            "description": "Calculate Fixed Deposit maturity amount. Use when user asks about FD returns, wants to compare FD vs SIP, or asks about safe investment options.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal": {"type": "number", "description": "FD amount in rupees"},
+                    "annual_rate": {"type": "number", "description": "Annual interest rate as percentage, use 7 as default for major banks"},
+                    "years": {"type": "integer", "description": "FD duration in years"}
+                },
+                "required": ["principal", "annual_rate", "years"]
+            }
+        }
+    }
+]
+
+def execute_tool(tool_name: str, tool_args: dict) -> str:
+    """Execute the requested tool and return result as string"""
+    if tool_name == "calculate_sip_returns":
+        result = calculate_sip_returns(**tool_args)
+    elif tool_name == "calculate_emi":
+        result = calculate_emi(**tool_args)
+    elif tool_name == "check_emergency_fund":
+        result = check_emergency_fund(**tool_args)
+    elif tool_name == "calculate_fd_returns":
+        result = calculate_fd_returns(**tool_args)
+    else:
+        result = {"error": f"Unknown tool: {tool_name}"}
+    return json.dumps(result)
 
 SYSTEM_PROMPT = SYSTEM_PROMPT = """
 You are FinSense, an AI financial decision coach 
@@ -185,11 +340,9 @@ def root():
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    # Get user profile and history from Supabase
     profile = get_user_profile(request.user_id)
     history = get_conversation_history(request.user_id)
 
-    # Build context from profile
     profile_context = ""
     if profile:
         profile_context = f"""
@@ -205,7 +358,6 @@ Use this context to give specific, personalised advice.
 Do not ask for information you already have.
 """
 
-    # Build messages
     messages = [{
         "role": "system",
         "content": SYSTEM_PROMPT + profile_context
@@ -222,15 +374,59 @@ Do not ask for information you already have.
         "content": request.message
     })
 
-    # Call Groq
+    # First LLM call - may decide to use tools
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=messages,
-        max_tokens=500,
+        tools=TOOLS,
+        tool_choice="auto",
+        max_tokens=1000,
         temperature=0.7
     )
 
-    reply = response.choices[0].message.content
+    response_message = response.choices[0].message
+
+    # Check if LLM wants to use tools
+    if response_message.tool_calls:
+        # Add assistant's tool call message to history
+        messages.append({
+            "role": "assistant",
+            "content": response_message.content or "",
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                }
+                for tc in response_message.tool_calls
+            ]
+        })
+
+        # Execute each tool call
+        for tool_call in response_message.tool_calls:
+            tool_name = tool_call.function.name
+            tool_args = json.loads(tool_call.function.arguments)
+            tool_result = execute_tool(tool_name, tool_args)
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": tool_result
+            })
+
+        # Second LLM call - generate final response with tool results
+        final_response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            max_tokens=1000,
+            temperature=0.7
+        )
+        reply = final_response.choices[0].message.content
+    else:
+        reply = response_message.content
 
     # Save to Supabase
     save_message(request.user_id, "user", request.message)
