@@ -4,6 +4,7 @@ from supabase import create_client
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from groq import Groq
 import os
 import json
 
@@ -12,6 +13,7 @@ load_dotenv()
 app = FastAPI()
 
 gemini = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 supabase = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
@@ -95,9 +97,9 @@ def execute_tool(tool_name: str, tool_args: dict) -> dict:
     else:
         return {"error": f"Unknown tool: {tool_name}"}
 
-# ============ TOOL DEFINITIONS ============
+# ============ TOOL DEFINITIONS FOR GEMINI ============
 
-TOOLS = [
+GEMINI_TOOLS = [
     types.Tool(
         function_declarations=[
             types.FunctionDeclaration(
@@ -186,6 +188,73 @@ TOOLS = [
             )
         ]
     )
+]
+
+# Tool definitions for Groq fallback
+GROQ_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_sip_returns",
+            "description": "Calculate future value of monthly SIP investment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "monthly_amount": {"type": "number", "description": "Monthly SIP amount in full rupees. Convert: 1 lakh=100000"},
+                    "years": {"type": "integer", "description": "Investment duration in years"},
+                    "expected_rate": {"type": "number", "description": "Annual return rate as percentage. Default 12 for equity funds"}
+                },
+                "required": ["monthly_amount", "years", "expected_rate"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_emi",
+            "description": "Calculate EMI for any loan.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal": {"type": "number", "description": "Loan amount in full rupees. Convert: 50 lakhs=5000000, 1 crore=10000000"},
+                    "annual_rate": {"type": "number", "description": "Annual interest rate as percentage"},
+                    "tenure_months": {"type": "integer", "description": "Loan tenure in months. Convert: 20 years=240"}
+                },
+                "required": ["principal", "annual_rate", "tenure_months"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_emergency_fund",
+            "description": "Check if user has adequate emergency fund.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "monthly_expenses": {"type": "number", "description": "Total monthly expenses in rupees"},
+                    "current_savings": {"type": "number", "description": "Current savings in rupees"}
+                },
+                "required": ["monthly_expenses", "current_savings"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_fd_returns",
+            "description": "Calculate Fixed Deposit maturity amount.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal": {"type": "number", "description": "FD amount in full rupees. Convert: 50 lakhs=5000000"},
+                    "annual_rate": {"type": "number", "description": "Annual interest rate. Default 7 for major banks"},
+                    "years": {"type": "integer", "description": "FD duration in years"}
+                },
+                "required": ["principal", "annual_rate", "years"]
+            }
+        }
+    }
 ]
 
 # ============ SYSTEM PROMPT ============
@@ -277,7 +346,7 @@ Respond ONLY in this JSON format:
 """
     try:
         eval_response = gemini.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-flash",
             contents=eval_prompt
         )
         scores = json.loads(eval_response.text.strip())
@@ -297,6 +366,119 @@ Respond ONLY in this JSON format:
         }).execute()
     except Exception as e:
         print(f"Evaluation error: {e}")
+
+# ============ GEMINI CHAT ============
+
+def chat_with_gemini(contents, system_instruction):
+    response = gemini.models.generate_content(
+        model="gemini-1.5-flash",
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            tools=GEMINI_TOOLS,
+            temperature=0.7
+        )
+    )
+
+    reply = ""
+    while True:
+        tool_called = False
+        for part in response.candidates[0].content.parts:
+            if hasattr(part, "function_call") and part.function_call and part.function_call.name:
+                tool_called = True
+                tool_name = part.function_call.name
+                tool_args = dict(part.function_call.args)
+
+                print(f"Gemini tool called: {tool_name} with args: {tool_args}")
+                tool_result = execute_tool(tool_name, tool_args)
+                print(f"Tool result: {tool_result}")
+
+                contents.append(types.Content(
+                    role="model",
+                    parts=[types.Part(function_call=part.function_call)]
+                ))
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part(
+                        function_response=types.FunctionResponse(
+                            name=tool_name,
+                            response={"result": tool_result}
+                        )
+                    )]
+                ))
+
+                response = gemini.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        tools=GEMINI_TOOLS,
+                        temperature=0.7
+                    )
+                )
+                break
+
+        if not tool_called:
+            reply = response.candidates[0].content.parts[0].text
+            break
+
+    return reply
+
+# ============ GROQ FALLBACK CHAT ============
+
+def chat_with_groq(messages, system_instruction):
+    groq_messages = [{"role": "system", "content": system_instruction}] + messages
+
+    response = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=groq_messages,
+        tools=GROQ_TOOLS,
+        tool_choice="auto",
+        max_tokens=1000,
+        temperature=0.7
+    )
+
+    response_message = response.choices[0].message
+
+    if response_message.tool_calls:
+        groq_messages.append({
+            "role": "assistant",
+            "content": response_message.content or "",
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                }
+                for tc in response_message.tool_calls
+            ]
+        })
+
+        for tool_call in response_message.tool_calls:
+            tool_name = tool_call.function.name
+            tool_args = json.loads(tool_call.function.arguments)
+            print(f"Groq fallback tool called: {tool_name} with args: {tool_args}")
+            tool_result = execute_tool(tool_name, tool_args)
+            print(f"Tool result: {tool_result}")
+
+            groq_messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": json.dumps(tool_result)
+            })
+
+        final_response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=groq_messages,
+            max_tokens=1000,
+            temperature=0.7
+        )
+        return final_response.choices[0].message.content
+    else:
+        return response_message.content
 
 # ============ ROUTES ============
 
@@ -329,79 +511,45 @@ Use this context for personalised advice.
 Do not ask for information you already have.
 """
 
-    # Build conversation history for Gemini
-    contents = []
+    system_instruction = SYSTEM_PROMPT + profile_context
+
+    # Build Gemini contents
+    gemini_contents = []
+    groq_messages = []
+
     for turn in history:
         role = "user" if turn["role"] == "user" else "model"
-        contents.append(types.Content(
+        gemini_contents.append(types.Content(
             role=role,
             parts=[types.Part(text=turn["content"])]
         ))
+        groq_messages.append({
+            "role": "user" if turn["role"] == "user" else "assistant",
+            "content": turn["content"]
+        })
 
-    # Add current message
-    contents.append(types.Content(
+    gemini_contents.append(types.Content(
         role="user",
         parts=[types.Part(text=request.message)]
     ))
+    groq_messages.append({
+        "role": "user",
+        "content": request.message
+    })
 
-    # Call Gemini with tools
-    response = gemini.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT + profile_context,
-            tools=TOOLS,
-            temperature=0.7
-        )
-    )
-
-    # Handle tool calls in a loop
+    # Try Gemini first, fall back to Groq
     reply = ""
-    while True:
-        tool_called = False
-
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, "function_call") and part.function_call:
-                tool_called = True
-                tool_name = part.function_call.name
-                tool_args = dict(part.function_call.args)
-
-                print(f"Tool called: {tool_name} with args: {tool_args}")
-                tool_result = execute_tool(tool_name, tool_args)
-                print(f"Tool result: {tool_result}")
-
-                # Add assistant tool call to contents
-                contents.append(types.Content(
-                    role="model",
-                    parts=[types.Part(function_call=part.function_call)]
-                ))
-
-                # Add tool result to contents
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(
-                        function_response=types.FunctionResponse(
-                            name=tool_name,
-                            response={"result": tool_result}
-                        )
-                    )]
-                ))
-
-                # Get next response
-                response = gemini.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_PROMPT + profile_context,
-                        tools=TOOLS,
-                        temperature=0.7
-                    )
-                )
-                break
-
-        if not tool_called:
-            reply = response.candidates[0].content.parts[0].text
-            break
+    try:
+        reply = chat_with_gemini(gemini_contents, system_instruction)
+        print("Response from: Gemini")
+    except Exception as e:
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower():
+            print(f"Gemini quota exceeded, falling back to Groq")
+            reply = chat_with_groq(groq_messages, system_instruction)
+            print("Response from: Groq fallback")
+        else:
+            print(f"Gemini error: {e}, falling back to Groq")
+            reply = chat_with_groq(groq_messages, system_instruction)
 
     save_message(request.user_id, "user", request.message)
     save_message(request.user_id, "assistant", reply)
@@ -414,7 +562,7 @@ Do not ask for information you already have.
 
 @app.get("/profile/{user_id}")
 def get_profile(user_id: str):
-    profile = get_user_profile(user_id)
+    profile = get_user_profile(request.user_id)
     if profile:
         return profile
     return {"message": "No profile found"}
