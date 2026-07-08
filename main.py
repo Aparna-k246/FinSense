@@ -97,7 +97,7 @@ def execute_tool(tool_name: str, tool_args: dict) -> dict:
     else:
         return {"error": f"Unknown tool: {tool_name}"}
 
-# ============ TOOL DEFINITIONS FOR GEMINI ============
+# ============ TOOL DEFINITIONS ============
 
 GEMINI_TOOLS = [
     types.Tool(
@@ -190,7 +190,6 @@ GEMINI_TOOLS = [
     )
 ]
 
-# Tool definitions for Groq fallback
 GROQ_TOOLS = [
     {
         "type": "function",
@@ -513,7 +512,7 @@ Do not ask for information you already have.
 
     system_instruction = SYSTEM_PROMPT + profile_context
 
-    # Build Gemini contents
+    # Build conversation history
     gemini_contents = []
     groq_messages = []
 
@@ -543,13 +542,13 @@ Do not ask for information you already have.
         reply = chat_with_gemini(gemini_contents, system_instruction)
         print("Response from: Gemini")
     except Exception as e:
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower():
-            print(f"Gemini quota exceeded, falling back to Groq")
+        print(f"Gemini failed: {e}, falling back to Groq")
+        try:
             reply = chat_with_groq(groq_messages, system_instruction)
             print("Response from: Groq fallback")
-        else:
-            print(f"Gemini error: {e}, falling back to Groq")
-            reply = chat_with_groq(groq_messages, system_instruction)
+        except Exception as e2:
+            print(f"Groq also failed: {e2}")
+            reply = "I'm having trouble connecting right now. Please try again in a moment."
 
     save_message(request.user_id, "user", request.message)
     save_message(request.user_id, "assistant", reply)
@@ -562,7 +561,7 @@ Do not ask for information you already have.
 
 @app.get("/profile/{user_id}")
 def get_profile(user_id: str):
-    profile = get_user_profile(request.user_id)
+    profile = get_user_profile(user_id)
     if profile:
         return profile
     return {"message": "No profile found"}
