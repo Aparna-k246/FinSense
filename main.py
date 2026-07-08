@@ -83,21 +83,7 @@ def calculate_fd_returns(principal: float, annual_rate: float, years: int) -> di
         "total_interest": round(total_interest, 2)
     }
 
-def convert_indian_amount(value: float) -> float:
-    """Convert lakh/crore shorthand to full rupee amount"""
-    if value <= 100:
-        return value * 100000  # treat as lakhs
-    elif value <= 1000:
-        return value * 1000    # treat as thousands
-    return value               # already in full rupees
-
 def execute_tool(tool_name: str, tool_args: dict) -> str:
-    # Normalize amount fields before executing
-    amount_fields = ["principal", "monthly_amount"]
-    for field in amount_fields:
-        if field in tool_args:
-            tool_args[field] = convert_indian_amount(tool_args[field])
-
     if tool_name == "calculate_sip_returns":
         result = calculate_sip_returns(**tool_args)
     elif tool_name == "calculate_emi":
@@ -123,7 +109,7 @@ TOOLS = [
                 "properties": {
                     "monthly_amount": {
                         "type": "number",
-                        "description": "Monthly SIP amount in rupees"
+                        "description": "Monthly investment in full rupees. Convert if needed: 1 lakh=100000. Example: 50000 rupees = 50000"
                     },
                     "years": {
                         "type": "integer",
@@ -148,7 +134,7 @@ TOOLS = [
                 "properties": {
                     "principal": {
                         "type": "number",
-                        "description": "Loan amount in rupees"
+                        "description": "Loan amount in full rupees. Convert Indian units yourself: 1 lakh=100000, 1 crore=10000000. Example: 50 lakhs = 5000000"
                     },
                     "annual_rate": {
                         "type": "number",
@@ -173,11 +159,11 @@ TOOLS = [
                 "properties": {
                     "monthly_expenses": {
                         "type": "number",
-                        "description": "Total monthly expenses in rupees"
+                        "description": "Total monthly expenses in full rupees. Convert if needed: 1 lakh=100000"
                     },
                     "current_savings": {
                         "type": "number",
-                        "description": "Current savings amount in rupees"
+                        "description": "Current savings in full rupees. Convert if needed: 1 lakh=100000"
                     }
                 },
                 "required": ["monthly_expenses", "current_savings"]
@@ -194,7 +180,7 @@ TOOLS = [
                 "properties": {
                     "principal": {
                         "type": "number",
-                        "description": "FD amount in rupees"
+                        "description": "FD amount in full rupees. Convert Indian units yourself: 1 lakh=100000, 1 crore=10000000. Example: 50 lakhs = 5000000"
                     },
                     "annual_rate": {
                         "type": "number",
