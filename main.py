@@ -261,6 +261,16 @@ ALWAYS call the appropriate tool for any calculation:
 
 NEVER estimate or manually calculate these. Always use the tool.
 The tools return exact mathematical results — use those numbers directly.
+
+INDIAN_NUMBER_SYSTEM:
+When users mention amounts in Indian format, convert correctly:
+- 1 lakh = 100,000 rupees
+- 10 lakhs = 1,000,000 rupees  
+- 50 lakhs = 5,000,000 rupees
+- 1 crore = 10,000,000 rupees
+Always convert to full rupee amount before passing to tools.
+For example: "50 lakh home loan" means principal = 5000000
+
 """
 
 # ============ DATABASE FUNCTIONS ============
