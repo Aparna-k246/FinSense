@@ -339,7 +339,7 @@ Respond in this exact JSON format with no other text:
 """
     try:
         eval_response = client.chat.completions.create(
-            model="llama3-groq-70b-8192-tool-use-preview",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": eval_prompt}],
             max_tokens=100,
             temperature=0
@@ -411,7 +411,7 @@ Do not ask for information you already have.
 
     # First LLM call with tool-use optimized model
     response = client.chat.completions.create(
-        model="llama3-groq-70b-8192-tool-use-preview",
+        model="llama-3.3-70b-versatile",
         messages=messages,
         tools=TOOLS,
         tool_choice="auto",
@@ -420,6 +420,11 @@ Do not ask for information you already have.
     )
 
     response_message = response.choices[0].message
+    response_message = response.choices[0].message
+    
+    # DEBUG - print to Railway logs
+    print(f"Tool calls made: {response_message.tool_calls}")
+    print(f"Message content: {response_message.content}")
 
     # If tools were called, execute them
     if response_message.tool_calls:
@@ -454,7 +459,7 @@ Do not ask for information you already have.
 
         # Final response with tool results
         final_response = client.chat.completions.create(
-            model="llama3-groq-70b-8192-tool-use-preview",
+            model="llama-3.3-70b-versatile",
             messages=messages,
             max_tokens=1000,
             temperature=0.7
