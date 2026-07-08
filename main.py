@@ -398,6 +398,18 @@ Do not ask for information you already have.
 
     response_message = response.choices[0].message
 
+    # If no tool calls, force retry with tool_choice="required"
+    if not response_message.tool_calls:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            tools=TOOLS,
+            tool_choice="required",
+            max_tokens=1000,
+            temperature=0.7
+        )
+        response_message = response.choices[0].message
+
     # Check if LLM wants to use tools
     if response_message.tool_calls:
         # Add assistant's tool call message to history
