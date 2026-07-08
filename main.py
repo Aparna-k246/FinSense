@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from groq import Groq
+from duckduckgo_search import DDGS
 import os
 import json
 
@@ -94,8 +95,31 @@ def execute_tool(tool_name: str, tool_args: dict) -> dict:
         return check_emergency_fund(**tool_args)
     elif tool_name == "calculate_fd_returns":
         return calculate_fd_returns(**tool_args)
+    elif tool_name == "search_financial_info":
+        return search_financial_info(**tool_args)
     else:
         return {"error": f"Unknown tool: {tool_name}"}
+    
+def search_financial_info(query: str) -> dict:
+    """Search for current Indian financial information"""
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(
+                query + " India 2025",
+                max_results=3
+            ))
+        return {
+            "results": [
+                {
+                    "title": r["title"],
+                    "content": r["body"][:500],
+                    "url": r["href"]
+                }
+                for r in results
+            ]
+        }
+    except Exception as e:
+        return {"error": str(e), "results": []}
 
 # ============ TOOL DEFINITIONS ============
 
@@ -185,7 +209,28 @@ GEMINI_TOOLS = [
                     },
                     required=["principal", "annual_rate", "years"]
                 )
-            )
+            ),
+            types.FunctionDeclaration(
+                name="search_financial_info",
+                description="""Search for current Indian financial information that changes frequently. Use this when user asks about:
+                - Current FD rates from specific banks
+                - Current RBI repo rate or monetary policy
+                - Latest mutual fund NAV or performance
+                - Current home loan or personal loan rates
+                - Recent SEBI regulations or changes
+                - Any financial rate or policy that may have changed recently
+                Do NOT use for general concepts like how SIP works or what is an EMI.""",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "query": types.Schema(
+                            type=types.Type.STRING,
+                            description="Search query for current Indian financial information. Be specific: 'SBI FD rates 2025' not just 'FD rates'"
+                            )
+                        },
+                        required=["query"]
+                    )
+                ),
         ]
     )
 ]
@@ -253,7 +298,24 @@ GROQ_TOOLS = [
                 "required": ["principal", "annual_rate", "years"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_financial_info",
+            "description": "Search for current Indian financial information like FD rates, RBI repo rate, loan rates, mutual fund performance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                    "type": "string",
+                    "description": "Search query for current Indian financial information"
+                }
+            },
+            "required": ["query"]
+        }
     }
+},
 ]
 
 # ============ SYSTEM PROMPT ============
@@ -293,6 +355,11 @@ ALWAYS use tools for calculations — never estimate manually:
 - calculate_sip_returns: for ANY SIP or investment growth question
 - calculate_fd_returns: for ANY fixed deposit question
 - check_emergency_fund: when user mentions savings and expenses
+
+- search_financial_info: when user asks about CURRENT rates, 
+  recent policy changes, or any information that changes 
+  frequently. Always search before answering questions about 
+  current FD rates, repo rates, or loan rates.
 """
 
 # ============ DATABASE FUNCTIONS ============

@@ -6,3 +6,6 @@ python-dotenv
 groq
 gotrue
 google-genai
+sentence-transformers
+numpy
+duckduckgo-search
