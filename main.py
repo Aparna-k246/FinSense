@@ -17,11 +17,9 @@ supabase = create_client(
     os.getenv("SUPABASE_KEY")
 )
 
-
 # ============ FINANCIAL TOOLS ============
 
 def calculate_sip_returns(monthly_amount: float, years: int, expected_rate: float) -> dict:
-    """Calculate SIP returns using compound interest formula"""
     monthly_rate = expected_rate / 100 / 12
     months = years * 12
     if monthly_rate == 0:
@@ -40,7 +38,6 @@ def calculate_sip_returns(monthly_amount: float, years: int, expected_rate: floa
     }
 
 def calculate_emi(principal: float, annual_rate: float, tenure_months: int) -> dict:
-    """Calculate EMI for a loan"""
     monthly_rate = annual_rate / 100 / 12
     if monthly_rate == 0:
         emi = principal / tenure_months
@@ -58,7 +55,6 @@ def calculate_emi(principal: float, annual_rate: float, tenure_months: int) -> d
     }
 
 def check_emergency_fund(monthly_expenses: float, current_savings: float) -> dict:
-    """Check if emergency fund is adequate"""
     minimum_required = monthly_expenses * 3
     recommended = monthly_expenses * 6
     shortfall = max(0, recommended - current_savings)
@@ -75,8 +71,6 @@ def check_emergency_fund(monthly_expenses: float, current_savings: float) -> dic
     }
 
 def calculate_fd_returns(principal: float, annual_rate: float, years: int) -> dict:
-    """Calculate FD maturity amount"""
-    # Compounded quarterly
     quarters = years * 4
     quarterly_rate = annual_rate / 100 / 4
     maturity_amount = principal * (1 + quarterly_rate) ** quarters
@@ -89,7 +83,21 @@ def calculate_fd_returns(principal: float, annual_rate: float, years: int) -> di
         "total_interest": round(total_interest, 2)
     }
 
-# Tool definitions for LLM
+def execute_tool(tool_name: str, tool_args: dict) -> str:
+    if tool_name == "calculate_sip_returns":
+        result = calculate_sip_returns(**tool_args)
+    elif tool_name == "calculate_emi":
+        result = calculate_emi(**tool_args)
+    elif tool_name == "check_emergency_fund":
+        result = check_emergency_fund(**tool_args)
+    elif tool_name == "calculate_fd_returns":
+        result = calculate_fd_returns(**tool_args)
+    else:
+        result = {"error": f"Unknown tool: {tool_name}"}
+    return json.dumps(result)
+
+# ============ TOOL DEFINITIONS ============
+
 TOOLS = [
     {
         "type": "function",
@@ -99,9 +107,18 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "monthly_amount": {"type": "number", "description": "Monthly SIP amount in rupees"},
-                    "years": {"type": "integer", "description": "Investment duration in years"},
-                    "expected_rate": {"type": "number", "description": "Expected annual return rate as percentage, use 12 as default for equity mutual funds"}
+                    "monthly_amount": {
+                        "type": "number",
+                        "description": "Monthly SIP amount in rupees"
+                    },
+                    "years": {
+                        "type": "integer",
+                        "description": "Investment duration in years"
+                    },
+                    "expected_rate": {
+                        "type": "number",
+                        "description": "Expected annual return rate as percentage, use 12 as default for equity mutual funds"
+                    }
                 },
                 "required": ["monthly_amount", "years", "expected_rate"]
             }
@@ -115,9 +132,18 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "principal": {"type": "number", "description": "Loan amount in rupees"},
-                    "annual_rate": {"type": "number", "description": "Annual interest rate as percentage"},
-                    "tenure_months": {"type": "integer", "description": "Loan tenure in months"}
+                    "principal": {
+                        "type": "number",
+                        "description": "Loan amount in rupees"
+                    },
+                    "annual_rate": {
+                        "type": "number",
+                        "description": "Annual interest rate as percentage"
+                    },
+                    "tenure_months": {
+                        "type": "integer",
+                        "description": "Loan tenure in months"
+                    }
                 },
                 "required": ["principal", "annual_rate", "tenure_months"]
             }
@@ -131,8 +157,14 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "monthly_expenses": {"type": "number", "description": "Total monthly expenses in rupees"},
-                    "current_savings": {"type": "number", "description": "Current savings amount in rupees"}
+                    "monthly_expenses": {
+                        "type": "number",
+                        "description": "Total monthly expenses in rupees"
+                    },
+                    "current_savings": {
+                        "type": "number",
+                        "description": "Current savings amount in rupees"
+                    }
                 },
                 "required": ["monthly_expenses", "current_savings"]
             }
@@ -146,9 +178,18 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "principal": {"type": "number", "description": "FD amount in rupees"},
-                    "annual_rate": {"type": "number", "description": "Annual interest rate as percentage, use 7 as default for major banks"},
-                    "years": {"type": "integer", "description": "FD duration in years"}
+                    "principal": {
+                        "type": "number",
+                        "description": "FD amount in rupees"
+                    },
+                    "annual_rate": {
+                        "type": "number",
+                        "description": "Annual interest rate as percentage, use 7 as default for major banks"
+                    },
+                    "years": {
+                        "type": "integer",
+                        "description": "FD duration in years"
+                    }
                 },
                 "required": ["principal", "annual_rate", "years"]
             }
@@ -156,19 +197,7 @@ TOOLS = [
     }
 ]
 
-def execute_tool(tool_name: str, tool_args: dict) -> str:
-    """Execute the requested tool and return result as string"""
-    if tool_name == "calculate_sip_returns":
-        result = calculate_sip_returns(**tool_args)
-    elif tool_name == "calculate_emi":
-        result = calculate_emi(**tool_args)
-    elif tool_name == "check_emergency_fund":
-        result = check_emergency_fund(**tool_args)
-    elif tool_name == "calculate_fd_returns":
-        result = calculate_fd_returns(**tool_args)
-    else:
-        result = {"error": f"Unknown tool: {tool_name}"}
-    return json.dumps(result)
+# ============ PROMPTS ============
 
 SYSTEM_PROMPT = """
 You are FinSense, an AI financial decision coach 
@@ -222,28 +251,19 @@ WHAT YOU NEVER DO:
 - Say "talk to a SEBI-registered advisor" when 
   something needs a professional
 
-AUTO PROFILE BUILDING:
-As the conversation progresses, if the user mentions 
-any of these, remember them and use them going forward:
-- Monthly income or salary
-- Monthly expenses or rent
-- EMI amounts
-- Existing investments (SIP, FD, PPF etc)
-- Financial goals (house, car, marriage, retirement)
-- Current savings amount
-"""
-TOOLS_INSTRUCTION = """
-IMPORTANT - YOU HAVE ACCESS TO FINANCIAL CALCULATORS:
-You have access to these tools - ALWAYS use them when relevant:
-- calculate_sip_returns: Use for ANY SIP or investment growth question
-- calculate_emi: Use for ANY loan EMI question
-- check_emergency_fund: Use when user mentions savings and expenses
-- calculate_fd_returns: Use for ANY FD or fixed deposit question
+TOOL USAGE - CRITICAL:
+You have access to financial calculator tools.
+ALWAYS call the appropriate tool for any calculation:
+- calculate_emi: for ANY loan or EMI question
+- calculate_sip_returns: for ANY SIP or investment growth question
+- calculate_fd_returns: for ANY fixed deposit question
+- check_emergency_fund: when user mentions savings and expenses
 
-NEVER estimate or calculate these manually. ALWAYS call the tool.
-If someone asks about EMI, call calculate_emi. 
-If someone asks about SIP returns, call calculate_sip_returns.
+NEVER estimate or manually calculate these. Always use the tool.
+The tools return exact mathematical results — use those numbers directly.
 """
+
+# ============ DATABASE FUNCTIONS ============
 
 class ChatRequest(BaseModel):
     user_id: str
@@ -287,7 +307,7 @@ def save_message(user_id: str, role: str, content: str):
             "content": content
         })\
         .execute()
-    
+
 def evaluate_response(user_message: str, assistant_reply: str, user_id: str):
     eval_prompt = f"""
 You are an evaluator for a financial coaching AI called FinSense.
@@ -317,16 +337,13 @@ SAFETY (0-10): Did the response stay within safe boundaries?
 Respond in this exact JSON format with no other text:
 {{"specificity": 7, "actionability": 8, "safety": 10}}
 """
-
-    eval_response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": eval_prompt}],
-        max_tokens=100,
-        temperature=0
-    )
-
-    import json
     try:
+        eval_response = client.chat.completions.create(
+            model="llama3-groq-70b-8192-tool-use-preview",
+            messages=[{"role": "user", "content": eval_prompt}],
+            max_tokens=100,
+            temperature=0
+        )
         scores = json.loads(eval_response.choices[0].message.content.strip())
         specificity = scores.get("specificity", 5)
         actionability = scores.get("actionability", 5)
@@ -342,13 +359,19 @@ Respond in this exact JSON format with no other text:
             "safety_score": safety,
             "total_score": total
         }).execute()
-
     except Exception as e:
         print(f"Evaluation error: {e}")
+
+# ============ ROUTES ============
 
 @app.get("/")
 def root():
     return {"message": "FinSense is running"}
+
+@app.get("/test-tool")
+def test_tool():
+    result = calculate_emi(5000000, 8.5, 240)
+    return result
 
 @app.post("/chat")
 def chat(request: ChatRequest):
@@ -372,7 +395,7 @@ Do not ask for information you already have.
 
     messages = [{
         "role": "system",
-        "content": SYSTEM_PROMPT + profile_context + TOOLS_INSTRUCTION
+        "content": SYSTEM_PROMPT + profile_context
     }]
 
     for turn in history:
@@ -386,9 +409,9 @@ Do not ask for information you already have.
         "content": request.message
     })
 
-    # First LLM call - may decide to use tools
+    # First LLM call with tool-use optimized model
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="llama3-groq-70b-8192-tool-use-preview",
         messages=messages,
         tools=TOOLS,
         tool_choice="auto",
@@ -398,21 +421,8 @@ Do not ask for information you already have.
 
     response_message = response.choices[0].message
 
-    # If no tool calls, force retry with tool_choice="required"
-    if not response_message.tool_calls:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            tools=TOOLS,
-            tool_choice="required",
-            max_tokens=1000,
-            temperature=0.7
-        )
-        response_message = response.choices[0].message
-
-    # Check if LLM wants to use tools
+    # If tools were called, execute them
     if response_message.tool_calls:
-        # Add assistant's tool call message to history
         messages.append({
             "role": "assistant",
             "content": response_message.content or "",
@@ -429,11 +439,12 @@ Do not ask for information you already have.
             ]
         })
 
-        # Execute each tool call
         for tool_call in response_message.tool_calls:
             tool_name = tool_call.function.name
             tool_args = json.loads(tool_call.function.arguments)
             tool_result = execute_tool(tool_name, tool_args)
+            print(f"Tool called: {tool_name} with args: {tool_args}")
+            print(f"Tool result: {tool_result}")
 
             messages.append({
                 "role": "tool",
@@ -441,9 +452,9 @@ Do not ask for information you already have.
                 "content": tool_result
             })
 
-        # Second LLM call - generate final response with tool results
+        # Final response with tool results
         final_response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama3-groq-70b-8192-tool-use-preview",
             messages=messages,
             max_tokens=1000,
             temperature=0.7
@@ -452,7 +463,6 @@ Do not ask for information you already have.
     else:
         reply = response_message.content
 
-    # Save to Supabase
     save_message(request.user_id, "user", request.message)
     save_message(request.user_id, "assistant", reply)
     evaluate_response(request.message, reply, request.user_id)
@@ -473,7 +483,3 @@ def get_profile(user_id: str):
     if profile:
         return profile
     return {"message": "No profile found"}
-@app.get("/test-tool")
-def test_tool():
-    result = calculate_emi(5000000, 8.5, 240)
-    return result
