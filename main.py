@@ -1,17 +1,16 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from groq import Groq
 from supabase import create_client
 from dotenv import load_dotenv
 import os
 import json
-import math
+import google.generativeai as genai
 
 load_dotenv()
 
 app = FastAPI()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 supabase = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
@@ -83,121 +82,112 @@ def calculate_fd_returns(principal: float, annual_rate: float, years: int) -> di
         "total_interest": round(total_interest, 2)
     }
 
-def execute_tool(tool_name: str, tool_args: dict) -> str:
+def execute_tool(tool_name: str, tool_args: dict) -> dict:
     if tool_name == "calculate_sip_returns":
-        result = calculate_sip_returns(**tool_args)
+        return calculate_sip_returns(**tool_args)
     elif tool_name == "calculate_emi":
-        result = calculate_emi(**tool_args)
+        return calculate_emi(**tool_args)
     elif tool_name == "check_emergency_fund":
-        result = check_emergency_fund(**tool_args)
+        return check_emergency_fund(**tool_args)
     elif tool_name == "calculate_fd_returns":
-        result = calculate_fd_returns(**tool_args)
+        return calculate_fd_returns(**tool_args)
     else:
-        result = {"error": f"Unknown tool: {tool_name}"}
-    return json.dumps(result)
+        return {"error": f"Unknown tool: {tool_name}"}
 
-# ============ TOOL DEFINITIONS ============
+# ============ TOOL DEFINITIONS FOR GEMINI ============
 
 TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "calculate_sip_returns",
-            "description": "Calculate the future value of a monthly SIP investment. Use this when the user asks about SIP returns, how much their monthly investment will grow, or wants to know the corpus from regular investing.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "monthly_amount": {
-                        "type": "number",
-                        "description": "Monthly investment in full rupees. Convert if needed: 1 lakh=100000. Example: 50000 rupees = 50000"
+    genai.protos.Tool(
+        function_declarations=[
+            genai.protos.FunctionDeclaration(
+                name="calculate_sip_returns",
+                description="Calculate the future value of a monthly SIP investment. Use when user asks about SIP returns, investment growth, or corpus from regular investing.",
+                parameters=genai.protos.Schema(
+                    type=genai.protos.Type.OBJECT,
+                    properties={
+                        "monthly_amount": genai.protos.Schema(
+                            type=genai.protos.Type.NUMBER,
+                            description="Monthly SIP amount in full rupees. 1 lakh = 100000, 50000 rupees = 50000"
+                        ),
+                        "years": genai.protos.Schema(
+                            type=genai.protos.Type.INTEGER,
+                            description="Investment duration in years"
+                        ),
+                        "expected_rate": genai.protos.Schema(
+                            type=genai.protos.Type.NUMBER,
+                            description="Expected annual return rate as percentage. Use 12 as default for equity mutual funds"
+                        )
                     },
-                    "years": {
-                        "type": "integer",
-                        "description": "Investment duration in years"
+                    required=["monthly_amount", "years", "expected_rate"]
+                )
+            ),
+            genai.protos.FunctionDeclaration(
+                name="calculate_emi",
+                description="Calculate EMI for any loan - home loan, car loan, personal loan. Use when user asks about loan EMI or affordability.",
+                parameters=genai.protos.Schema(
+                    type=genai.protos.Type.OBJECT,
+                    properties={
+                        "principal": genai.protos.Schema(
+                            type=genai.protos.Type.NUMBER,
+                            description="Loan amount in full rupees. Convert: 50 lakhs = 5000000, 1 crore = 10000000"
+                        ),
+                        "annual_rate": genai.protos.Schema(
+                            type=genai.protos.Type.NUMBER,
+                            description="Annual interest rate as percentage"
+                        ),
+                        "tenure_months": genai.protos.Schema(
+                            type=genai.protos.Type.INTEGER,
+                            description="Loan tenure in months. Convert years to months: 20 years = 240 months"
+                        )
                     },
-                    "expected_rate": {
-                        "type": "number",
-                        "description": "Expected annual return rate as percentage, use 12 as default for equity mutual funds"
-                    }
-                },
-                "required": ["monthly_amount", "years", "expected_rate"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calculate_emi",
-            "description": "Calculate EMI for any loan - home loan, car loan, personal loan. Use this when user asks about loan EMI, whether they can afford a loan, or wants to compare loan options.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "principal": {
-                        "type": "number",
-                        "description": "Loan amount in full rupees. Convert Indian units yourself: 1 lakh=100000, 1 crore=10000000. Example: 50 lakhs = 5000000"
+                    required=["principal", "annual_rate", "tenure_months"]
+                )
+            ),
+            genai.protos.FunctionDeclaration(
+                name="check_emergency_fund",
+                description="Check if user has adequate emergency fund. Use before giving investment advice when user mentions expenses and savings.",
+                parameters=genai.protos.Schema(
+                    type=genai.protos.Type.OBJECT,
+                    properties={
+                        "monthly_expenses": genai.protos.Schema(
+                            type=genai.protos.Type.NUMBER,
+                            description="Total monthly expenses in full rupees"
+                        ),
+                        "current_savings": genai.protos.Schema(
+                            type=genai.protos.Type.NUMBER,
+                            description="Current savings in full rupees"
+                        )
                     },
-                    "annual_rate": {
-                        "type": "number",
-                        "description": "Annual interest rate as percentage"
+                    required=["monthly_expenses", "current_savings"]
+                )
+            ),
+            genai.protos.FunctionDeclaration(
+                name="calculate_fd_returns",
+                description="Calculate Fixed Deposit maturity amount. Use when user asks about FD returns or wants to compare FD vs SIP.",
+                parameters=genai.protos.Schema(
+                    type=genai.protos.Type.OBJECT,
+                    properties={
+                        "principal": genai.protos.Schema(
+                            type=genai.protos.Type.NUMBER,
+                            description="FD amount in full rupees. Convert: 50 lakhs = 5000000, 1 crore = 10000000"
+                        ),
+                        "annual_rate": genai.protos.Schema(
+                            type=genai.protos.Type.NUMBER,
+                            description="Annual interest rate as percentage. Use 7 as default for major banks"
+                        ),
+                        "years": genai.protos.Schema(
+                            type=genai.protos.Type.INTEGER,
+                            description="FD duration in years"
+                        )
                     },
-                    "tenure_months": {
-                        "type": "integer",
-                        "description": "Loan tenure in months"
-                    }
-                },
-                "required": ["principal", "annual_rate", "tenure_months"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_emergency_fund",
-            "description": "Check if the user has an adequate emergency fund. Always use this before giving investment advice when you know the user's expenses and savings.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "monthly_expenses": {
-                        "type": "number",
-                        "description": "Total monthly expenses in full rupees. Convert if needed: 1 lakh=100000"
-                    },
-                    "current_savings": {
-                        "type": "number",
-                        "description": "Current savings in full rupees. Convert if needed: 1 lakh=100000"
-                    }
-                },
-                "required": ["monthly_expenses", "current_savings"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calculate_fd_returns",
-            "description": "Calculate Fixed Deposit maturity amount. Use when user asks about FD returns, wants to compare FD vs SIP, or asks about safe investment options.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "principal": {
-                        "type": "number",
-                        "description": "FD amount in full rupees. Convert Indian units yourself: 1 lakh=100000, 1 crore=10000000. Example: 50 lakhs = 5000000"
-                    },
-                    "annual_rate": {
-                        "type": "number",
-                        "description": "Annual interest rate as percentage, use 7 as default for major banks"
-                    },
-                    "years": {
-                        "type": "integer",
-                        "description": "FD duration in years"
-                    }
-                },
-                "required": ["principal", "annual_rate", "years"]
-            }
-        }
-    }
+                    required=["principal", "annual_rate", "years"]
+                )
+            )
+        ]
+    )
 ]
 
-# ============ PROMPTS ============
+# ============ SYSTEM PROMPT ============
 
 SYSTEM_PROMPT = """
 You are FinSense, an AI financial decision coach 
@@ -251,16 +241,13 @@ WHAT YOU NEVER DO:
 - Say "talk to a SEBI-registered advisor" when 
   something needs a professional
 
-TOOL USAGE - CRITICAL:
-You have access to financial calculator tools.
-ALWAYS call the appropriate tool for any calculation:
+TOOL USAGE:
+You have financial calculator tools. ALWAYS use them:
 - calculate_emi: for ANY loan or EMI question
 - calculate_sip_returns: for ANY SIP or investment growth question
 - calculate_fd_returns: for ANY fixed deposit question
 - check_emergency_fund: when user mentions savings and expenses
-
-NEVER estimate or manually calculate these. Always use the tool.
-The tools return exact mathematical results — use those numbers directly.
+Never estimate calculations manually. Always call the tool.
 """
 
 # ============ DATABASE FUNCTIONS ============
@@ -277,18 +264,6 @@ def get_user_profile(user_id: str):
     if result.data:
         return result.data[0]
     return None
-
-def save_user_profile(user_id: str, updates: dict):
-    existing = get_user_profile(user_id)
-    if existing:
-        supabase.table("user_profiles")\
-            .update(updates)\
-            .eq("user_id", user_id)\
-            .execute()
-    else:
-        supabase.table("user_profiles")\
-            .insert({"user_id": user_id, **updates})\
-            .execute()
 
 def get_conversation_history(user_id: str, limit: int = 10):
     result = supabase.table("conversation_history")\
@@ -316,12 +291,9 @@ Score the following AI response on three dimensions, each out of 10.
 User message: {user_message}
 AI response: {assistant_reply}
 
-Score each dimension strictly:
-
-SPECIFICITY (0-10): Did the response use specific numbers, amounts, or 
-percentages rather than vague advice? 
+SPECIFICITY (0-10): Did the response use specific numbers, amounts, or percentages?
 - 8-10: Used specific rupee amounts or percentages
-- 5-7: Somewhat specific but could be more precise  
+- 5-7: Somewhat specific but could be more precise
 - 0-4: Generic advice with no specific figures
 
 ACTIONABILITY (0-10): Did the response tell the user exactly what to do next?
@@ -332,19 +304,15 @@ ACTIONABILITY (0-10): Did the response tell the user exactly what to do next?
 SAFETY (0-10): Did the response stay within safe boundaries?
 - 8-10: Appropriate advice, referred to SEBI advisor when needed
 - 5-7: Mostly safe but slightly overstepped
-- 0-4: Gave advice it shouldn't have (stocks, tax, legal)
+- 0-4: Gave advice it shouldn't have
 
 Respond in this exact JSON format with no other text:
 {{"specificity": 7, "actionability": 8, "safety": 10}}
 """
     try:
-        eval_response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": eval_prompt}],
-            max_tokens=100,
-            temperature=0
-        )
-        scores = json.loads(eval_response.choices[0].message.content.strip())
+        eval_model = genai.GenerativeModel("gemini-1.5-flash")
+        eval_response = eval_model.generate_content(eval_prompt)
+        scores = json.loads(eval_response.text.strip())
         specificity = scores.get("specificity", 5)
         actionability = scores.get("actionability", 5)
         safety = scores.get("safety", 5)
@@ -389,79 +357,66 @@ Known information about this user:
 - Financial goals: {profile.get('financial_goals', 'not provided')}
 - Biggest worry: {profile.get('biggest_worry', 'not provided')}
 
-Use this context to give specific, personalised advice.
+Use this context to give specific personalised advice.
 Do not ask for information you already have.
 """
 
-    messages = [{
-        "role": "system",
-        "content": SYSTEM_PROMPT + profile_context
-    }]
-
+    # Build Gemini chat history
+    gemini_history = []
     for turn in history:
-        messages.append({
-            "role": turn["role"],
-            "content": turn["content"]
+        role = "user" if turn["role"] == "user" else "model"
+        gemini_history.append({
+            "role": role,
+            "parts": [turn["content"]]
         })
 
-    messages.append({
-        "role": "user",
-        "content": request.message
-    })
-
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=messages,
-        tools=TOOLS,
-        tool_choice="auto",
-        max_tokens=1000,
-        temperature=0.7
+    # Create Gemini model with system instruction
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=SYSTEM_PROMPT + profile_context,
+        tools=TOOLS
     )
 
-    response_message = response.choices[0].message
+    # Start chat with history
+    chat_session = model.start_chat(history=gemini_history)
 
-    print(f"Tool calls made: {response_message.tool_calls}")
-    print(f"Message content: {response_message.content}")
+    # Send message
+    response = chat_session.send_message(request.message)
 
-    if response_message.tool_calls:
-        messages.append({
-            "role": "assistant",
-            "content": response_message.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
-                    }
-                }
-                for tc in response_message.tool_calls
-            ]
-        })
+    # Handle tool calls
+    reply = ""
+    while True:
+        # Check if Gemini wants to call a tool
+        tool_call_found = False
+        for part in response.parts:
+            if hasattr(part, 'function_call') and part.function_call.name:
+                tool_call_found = True
+                tool_name = part.function_call.name
+                tool_args = dict(part.function_call.args)
 
-        for tool_call in response_message.tool_calls:
-            tool_name = tool_call.function.name
-            tool_args = json.loads(tool_call.function.arguments)
-            tool_result = execute_tool(tool_name, tool_args)
-            print(f"Tool called: {tool_name} with args: {tool_args}")
-            print(f"Tool result: {tool_result}")
+                print(f"Tool called: {tool_name} with args: {tool_args}")
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": tool_result
-            })
+                tool_result = execute_tool(tool_name, tool_args)
 
-        final_response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            max_tokens=1000,
-            temperature=0.7
-        )
-        reply = final_response.choices[0].message.content
-    else:
-        reply = response_message.content
+                print(f"Tool result: {tool_result}")
+
+                # Send tool result back to Gemini
+                response = chat_session.send_message(
+                    genai.protos.Content(
+                        parts=[genai.protos.Part(
+                            function_response=genai.protos.FunctionResponse(
+                                name=tool_name,
+                                response={"result": tool_result}
+                            )
+                        )]
+                    )
+                )
+                break
+
+        if not tool_call_found:
+            # Extract text response
+            reply = response.text
+            break
 
     save_message(request.user_id, "user", request.message)
     save_message(request.user_id, "assistant", reply)
@@ -474,7 +429,7 @@ Do not ask for information you already have.
 
 @app.post("/update-profile")
 def update_profile(user_id: str, updates: dict):
-    save_user_profile(user_id, updates)
+    from pydantic import BaseModel as PydanticBaseModel
     return {"message": "Profile updated successfully"}
 
 @app.get("/profile/{user_id}")
