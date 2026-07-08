@@ -83,7 +83,21 @@ def calculate_fd_returns(principal: float, annual_rate: float, years: int) -> di
         "total_interest": round(total_interest, 2)
     }
 
+def convert_indian_amount(value: float) -> float:
+    """Convert lakh/crore shorthand to full rupee amount"""
+    if value <= 100:
+        return value * 100000  # treat as lakhs
+    elif value <= 1000:
+        return value * 1000    # treat as thousands
+    return value               # already in full rupees
+
 def execute_tool(tool_name: str, tool_args: dict) -> str:
+    # Normalize amount fields before executing
+    amount_fields = ["principal", "monthly_amount"]
+    for field in amount_fields:
+        if field in tool_args:
+            tool_args[field] = convert_indian_amount(tool_args[field])
+
     if tool_name == "calculate_sip_returns":
         result = calculate_sip_returns(**tool_args)
     elif tool_name == "calculate_emi":
@@ -261,16 +275,6 @@ ALWAYS call the appropriate tool for any calculation:
 
 NEVER estimate or manually calculate these. Always use the tool.
 The tools return exact mathematical results — use those numbers directly.
-
-INDIAN_NUMBER_SYSTEM:
-When users mention amounts in Indian format, convert correctly:
-- 1 lakh = 100,000 rupees
-- 10 lakhs = 1,000,000 rupees  
-- 50 lakhs = 5,000,000 rupees
-- 1 crore = 10,000,000 rupees
-Always convert to full rupee amount before passing to tools.
-For example: "50 lakh home loan" means principal = 5000000
-
 """
 
 # ============ DATABASE FUNCTIONS ============
@@ -419,7 +423,6 @@ Do not ask for information you already have.
         "content": request.message
     })
 
-    # First LLM call with tool-use optimized model
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=messages,
@@ -430,13 +433,10 @@ Do not ask for information you already have.
     )
 
     response_message = response.choices[0].message
-    response_message = response.choices[0].message
-    
-    # DEBUG - print to Railway logs
+
     print(f"Tool calls made: {response_message.tool_calls}")
     print(f"Message content: {response_message.content}")
 
-    # If tools were called, execute them
     if response_message.tool_calls:
         messages.append({
             "role": "assistant",
@@ -467,7 +467,6 @@ Do not ask for information you already have.
                 "content": tool_result
             })
 
-        # Final response with tool results
         final_response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
