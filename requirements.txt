@@ -5,4 +5,4 @@ supabase
 python-dotenv
 groq
 gotrue
-google-generativeai
+google-genai
