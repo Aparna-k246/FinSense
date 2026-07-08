@@ -412,7 +412,7 @@ Respond ONLY in this JSON format:
 """
     try:
         eval_response = gemini.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash-lite",
             contents=eval_prompt
         )
         scores = json.loads(eval_response.text.strip())
@@ -437,7 +437,7 @@ Respond ONLY in this JSON format:
 
 def chat_with_gemini(contents, system_instruction):
     response = gemini.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-2.0-flash-lite",
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
@@ -474,7 +474,7 @@ def chat_with_gemini(contents, system_instruction):
                 ))
 
                 response = gemini.models.generate_content(
-                    model="gemini-1.5-flash",
+                    model="gemini-2.0-flash-lite",
                     contents=contents,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
@@ -525,26 +525,26 @@ def chat_with_groq(messages, system_instruction):
 
         for tool_call in response_message.tool_calls:
             tool_name = tool_call.function.name
-            tool_args = json.loads(tool_call.function.arguments)
+            try:
+                tool_args = json.loads(tool_call.function.arguments)
+            except json.JSONDecodeError:
+                print(f"Groq malformed tool args: {tool_call.function.arguments}")
+                continue
             print(f"Groq fallback tool called: {tool_name} with args: {tool_args}")
             tool_result = execute_tool(tool_name, tool_args)
             print(f"Tool result: {tool_result}")
-
             groq_messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call.id,
                 "content": json.dumps(tool_result)
-            })
-
-        final_response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=groq_messages,
-            max_tokens=1000,
-            temperature=0.7
-        )
-        return final_response.choices[0].message.content
-    else:
-        return response_message.content
+                })
+            final_response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=groq_messages,
+                max_tokens=1000,
+                temperature=0.7
+                )
+            return final_response.choices[0].message.content
 
 # ============ ROUTES ============
 
