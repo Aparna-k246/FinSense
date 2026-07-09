@@ -9,6 +9,7 @@ from duckduckgo_search import DDGS
 import os
 import json
 import time
+import re
 
 load_dotenv()
 
@@ -104,8 +105,15 @@ def search_financial_info(query: str) -> dict:
         with DDGS() as ddgs:
             results = list(ddgs.text(
                 query + " India 2025",
-                max_results=3
+                max_results=3,
+                region="in-en"
             ))
+        if not results:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(
+                    query,
+                    max_results=3
+                ))
         result = {
             "results": [
                 {
@@ -355,9 +363,22 @@ HOW TO HANDLE CONVERSATIONS:
 
 WHAT YOU NEVER DO:
 - Never ask for salary as the very first message
-- Never recommend specific stocks or crypto
+- Never recommend specific stocks, mutual funds by name, or crypto
 - Never give tax filing advice
+- Never give specific buy/sell advice on any security
 - Say "talk to a SEBI-registered advisor" when needed
+
+WHEN USERS ASK ABOUT STOCKS OR CRYPTO:
+- Never say "buy X stock" or "invest in Bitcoin"
+- Instead redirect: "I can't recommend specific stocks or crypto
+  — that requires a SEBI-registered investment advisor. What I 
+  can help with is building the foundation first — emergency 
+  fund, SIP in index funds, and debt management. Want to 
+  start there?"
+- Explain the difference between speculation (stocks/crypto) 
+  and investing (mutual funds, FD, PPF)
+- If they insist: "For stock and crypto advice, please consult 
+  a SEBI-registered advisor at sebi.gov.in"
 
 TOOL USAGE:
 ALWAYS use tools for calculations — never estimate manually:
@@ -424,7 +445,9 @@ Respond ONLY in this JSON format:
             max_tokens=100,
             temperature=0
         )
-        scores = json.loads(eval_response.choices[0].message.content.strip())
+        raw = eval_response.choices[0].message.content.strip()
+        clean = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+        scores = json.loads(clean)
         specificity = scores.get("specificity", 5)
         actionability = scores.get("actionability", 5)
         safety = scores.get("safety", 5)
@@ -441,6 +464,15 @@ Respond ONLY in this JSON format:
         }).execute()
     except Exception as e:
         print(f"Evaluation error: {e}")
+
+# ============ CLEAN RESPONSE ============
+
+def clean_response(text: str) -> str:
+    """Remove thinking tags from reasoning models"""
+    if text is None:
+        return ""
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    return text.strip()
 
 # ============ GROQ PRIMARY CHAT ============
 
@@ -499,9 +531,9 @@ def chat_with_groq(messages, system_instruction):
             max_tokens=1000,
             temperature=0.7
         )
-        return final_response.choices[0].message.content
+        return clean_response(final_response.choices[0].message.content)
     else:
-        return response_message.content
+        return clean_response(response_message.content)
 
 # ============ GEMINI FALLBACK CHAT ============
 
@@ -573,7 +605,6 @@ def test_tool():
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    # Check response cache first
     cache_key = f"{request.user_id}:{request.message.lower().strip()}"
     if cache_key in response_cache:
         cache_time, cached_reply = response_cache[cache_key]
@@ -624,7 +655,6 @@ Do not ask for information you already have.
         "content": request.message
     })
 
-    # Groq primary, Gemini fallback
     reply = ""
     try:
         reply = chat_with_groq(groq_messages, system_instruction)
@@ -638,7 +668,6 @@ Do not ask for information you already have.
             print(f"Gemini also failed: {e2}")
             reply = "I'm having trouble connecting right now. Please try again in a moment."
 
-    # Cache the response
     response_cache[cache_key] = (time.time(), reply)
 
     save_message(request.user_id, "user", request.message)
