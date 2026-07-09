@@ -110,10 +110,7 @@ def search_financial_info(query: str) -> dict:
             ))
         if not results:
             with DDGS() as ddgs:
-                results = list(ddgs.text(
-                    query,
-                    max_results=3
-                ))
+                results = list(ddgs.text(query, max_results=3))
         result = {
             "results": [
                 {
@@ -423,6 +420,69 @@ def save_message(user_id: str, role: str, content: str):
         })\
         .execute()
 
+def extract_and_update_profile(user_id: str, user_message: str, assistant_reply: str):
+    """Extract financial details from conversation and update user profile"""
+    extraction_prompt = f"""
+Extract any financial information mentioned in this conversation.
+Return ONLY a JSON object with the fields that were mentioned.
+If a field was not mentioned, do not include it.
+
+User message: {user_message}
+Assistant reply: {assistant_reply}
+
+Extract these fields if mentioned:
+- monthly_income: number (monthly salary or income in rupees)
+- fixed_expenses: number (monthly fixed expenses in rupees)
+- emi_amount: number (monthly EMI payments in rupees)
+- existing_investments: string (SIP, FD, PPF etc)
+- financial_goals: string (house, car, retirement etc)
+- biggest_worry: string (debt, savings, investment etc)
+
+Return ONLY valid JSON like this example:
+{{"monthly_income": 60000, "financial_goals": "buy a house"}}
+
+If nothing financial was mentioned, return empty JSON: {{}}
+"""
+    try:
+        extraction_response = groq_client.chat.completions.create(
+            model="qwen/qwen3-32b",
+            messages=[{"role": "user", "content": extraction_prompt}],
+            max_tokens=200,
+            temperature=0
+        )
+        raw = extraction_response.choices[0].message.content.strip()
+        clean = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+
+        json_match = re.search(r'\{.*\}', clean, re.DOTALL)
+        if not json_match:
+            return
+
+        extracted = json.loads(json_match.group())
+        if not extracted:
+            return
+
+        print(f"Extracted profile data: {extracted}")
+
+        existing = supabase.table("user_profiles")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .execute()
+
+        if existing.data:
+            supabase.table("user_profiles")\
+                .update(extracted)\
+                .eq("user_id", user_id)\
+                .execute()
+        else:
+            supabase.table("user_profiles")\
+                .insert({"user_id": user_id, **extracted})\
+                .execute()
+
+        print(f"Profile updated for user: {user_id}")
+
+    except Exception as e:
+        print(f"Profile extraction error: {e}")
+
 def evaluate_response(user_message: str, assistant_reply: str, user_id: str):
     eval_prompt = f"""
 You are an evaluator for FinSense, an AI financial coaching app.
@@ -672,6 +732,7 @@ Do not ask for information you already have.
 
     save_message(request.user_id, "user", request.message)
     save_message(request.user_id, "assistant", reply)
+    extract_and_update_profile(request.user_id, request.message, reply)
     evaluate_response(request.message, reply, request.user_id)
 
     return {
