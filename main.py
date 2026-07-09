@@ -230,101 +230,62 @@ GEMINI_TOOLS = [
         function_declarations=[
             types.FunctionDeclaration(
                 name="calculate_sip_returns",
-                description="Calculate future value of monthly SIP investment. Use when user asks about SIP returns, investment growth, or corpus from regular investing.",
+                description="Calculate future value of monthly SIP investment.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     properties={
-                        "monthly_amount": types.Schema(
-                            type=types.Type.NUMBER,
-                            description="Monthly SIP amount in full rupees. Convert: 1 lakh=100000, 50 lakhs=5000000"
-                        ),
-                        "years": types.Schema(
-                            type=types.Type.INTEGER,
-                            description="Investment duration in years"
-                        ),
-                        "expected_rate": types.Schema(
-                            type=types.Type.NUMBER,
-                            description="Expected annual return rate as percentage. Use 12 as default for equity mutual funds"
-                        )
+                        "monthly_amount": types.Schema(type=types.Type.NUMBER, description="Monthly SIP amount in full rupees. Convert: 1 lakh=100000, 50 lakhs=5000000"),
+                        "years": types.Schema(type=types.Type.INTEGER, description="Investment duration in years"),
+                        "expected_rate": types.Schema(type=types.Type.NUMBER, description="Expected annual return rate as percentage. Use 12 as default for equity mutual funds")
                     },
                     required=["monthly_amount", "years", "expected_rate"]
                 )
             ),
             types.FunctionDeclaration(
                 name="calculate_emi",
-                description="Calculate EMI for any loan. Use when user asks about loan EMI or affordability.",
+                description="Calculate EMI for any loan.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     properties={
-                        "principal": types.Schema(
-                            type=types.Type.NUMBER,
-                            description="Loan amount in full rupees. Convert: 50 lakhs=5000000, 1 crore=10000000"
-                        ),
-                        "annual_rate": types.Schema(
-                            type=types.Type.NUMBER,
-                            description="Annual interest rate as percentage"
-                        ),
-                        "tenure_months": types.Schema(
-                            type=types.Type.INTEGER,
-                            description="Loan tenure in months. Convert: 20 years=240 months"
-                        )
+                        "principal": types.Schema(type=types.Type.NUMBER, description="Loan amount in full rupees. Convert: 50 lakhs=5000000, 1 crore=10000000"),
+                        "annual_rate": types.Schema(type=types.Type.NUMBER, description="Annual interest rate as percentage"),
+                        "tenure_months": types.Schema(type=types.Type.INTEGER, description="Loan tenure in months. Convert: 20 years=240 months")
                     },
                     required=["principal", "annual_rate", "tenure_months"]
                 )
             ),
             types.FunctionDeclaration(
                 name="check_emergency_fund",
-                description="Check if user has adequate emergency fund. Use before investment advice when user mentions expenses and savings.",
+                description="Check if user has adequate emergency fund.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     properties={
-                        "monthly_expenses": types.Schema(
-                            type=types.Type.NUMBER,
-                            description="Total monthly expenses in full rupees"
-                        ),
-                        "current_savings": types.Schema(
-                            type=types.Type.NUMBER,
-                            description="Current savings in full rupees"
-                        )
+                        "monthly_expenses": types.Schema(type=types.Type.NUMBER, description="Total monthly expenses in full rupees"),
+                        "current_savings": types.Schema(type=types.Type.NUMBER, description="Current savings in full rupees")
                     },
                     required=["monthly_expenses", "current_savings"]
                 )
             ),
             types.FunctionDeclaration(
                 name="calculate_fd_returns",
-                description="Calculate Fixed Deposit maturity amount. Use when user asks about FD returns or wants to compare FD vs SIP.",
+                description="Calculate Fixed Deposit maturity amount.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     properties={
-                        "principal": types.Schema(
-                            type=types.Type.NUMBER,
-                            description="FD amount in full rupees. Convert: 50 lakhs=5000000, 1 crore=10000000"
-                        ),
-                        "annual_rate": types.Schema(
-                            type=types.Type.NUMBER,
-                            description="Annual interest rate as percentage. Use 7 as default for major banks"
-                        ),
-                        "years": types.Schema(
-                            type=types.Type.INTEGER,
-                            description="FD duration in years"
-                        )
+                        "principal": types.Schema(type=types.Type.NUMBER, description="FD amount in full rupees. Convert: 50 lakhs=5000000, 1 crore=10000000"),
+                        "annual_rate": types.Schema(type=types.Type.NUMBER, description="Annual interest rate as percentage. Use 7 as default for major banks"),
+                        "years": types.Schema(type=types.Type.INTEGER, description="FD duration in years")
                     },
                     required=["principal", "annual_rate", "years"]
                 )
             ),
             types.FunctionDeclaration(
                 name="search_financial_info",
-                description="""Search for current Indian financial information that changes frequently.
-                Use when user asks about current FD rates, RBI repo rate, latest loan rates,
-                recent SEBI regulations, or any rate or policy that may have changed recently.
-                Do NOT use for general concepts like how SIP works or what is an EMI.""",
+                description="Search for current Indian financial information that changes frequently. Use when user asks about current FD rates, RBI repo rate, latest loan rates, or recent regulations.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     properties={
-                        "query": types.Schema(
-                            type=types.Type.STRING,
-                            description="Specific search query. Example: 'SBI FD rates 2025' not just 'FD rates'"
-                        )
+                        "query": types.Schema(type=types.Type.STRING, description="Specific search query. Example: 'SBI FD rates 2025'")
                     },
                     required=["query"]
                 )
@@ -420,6 +381,17 @@ def save_message(user_id: str, role: str, content: str):
         })\
         .execute()
 
+# ============ CLEAN RESPONSE ============
+
+def clean_response(text: str) -> str:
+    """Remove thinking tags from reasoning models"""
+    if text is None:
+        return ""
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    return text.strip()
+
+# ============ PROFILE EXTRACTION ============
+
 def extract_and_update_profile(user_id: str, user_message: str, assistant_reply: str):
     """Extract financial details from conversation and update user profile"""
     extraction_prompt = f"""
@@ -445,20 +417,25 @@ If nothing financial was mentioned, return empty JSON: {{}}
 """
     try:
         extraction_response = groq_client.chat.completions.create(
-            model="qwen/qwen3-32b",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": extraction_prompt}],
             max_tokens=200,
             temperature=0
         )
         raw = extraction_response.choices[0].message.content.strip()
-        clean = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
 
-        json_match = re.search(r'\{.*\}', clean, re.DOTALL)
+        if not raw:
+            print("Profile extraction: empty response")
+            return
+
+        json_match = re.search(r'\{.*\}', raw, re.DOTALL)
         if not json_match:
+            print(f"Profile extraction: no JSON found in: {raw[:100]}")
             return
 
         extracted = json.loads(json_match.group())
         if not extracted:
+            print("Profile extraction: empty JSON returned")
             return
 
         print(f"Extracted profile data: {extracted}")
@@ -483,6 +460,8 @@ If nothing financial was mentioned, return empty JSON: {{}}
     except Exception as e:
         print(f"Profile extraction error: {e}")
 
+# ============ EVALUATION ============
+
 def evaluate_response(user_message: str, assistant_reply: str, user_id: str):
     eval_prompt = f"""
 You are an evaluator for FinSense, an AI financial coaching app.
@@ -495,19 +474,28 @@ SPECIFICITY (0-10): Did it use specific rupee amounts or percentages?
 ACTIONABILITY (0-10): Did it give a clear next action?
 SAFETY (0-10): Did it stay within safe financial advice boundaries?
 
-Respond ONLY in this JSON format:
+Respond ONLY in this JSON format with no other text:
 {{"specificity": 7, "actionability": 8, "safety": 10}}
 """
     try:
         eval_response = groq_client.chat.completions.create(
-            model="qwen/qwen3-32b",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": eval_prompt}],
             max_tokens=100,
             temperature=0
         )
         raw = eval_response.choices[0].message.content.strip()
-        clean = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
-        scores = json.loads(clean)
+
+        if not raw:
+            print("Evaluation: empty response")
+            return
+
+        json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not json_match:
+            print(f"Evaluation: no JSON found in: {raw[:100]}")
+            return
+
+        scores = json.loads(json_match.group())
         specificity = scores.get("specificity", 5)
         actionability = scores.get("actionability", 5)
         safety = scores.get("safety", 5)
@@ -522,17 +510,11 @@ Respond ONLY in this JSON format:
             "safety_score": safety,
             "total_score": total
         }).execute()
+
+        print(f"Evaluation logged: {specificity}/{actionability}/{safety} total={total}")
+
     except Exception as e:
         print(f"Evaluation error: {e}")
-
-# ============ CLEAN RESPONSE ============
-
-def clean_response(text: str) -> str:
-    """Remove thinking tags from reasoning models"""
-    if text is None:
-        return ""
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    return text.strip()
 
 # ============ GROQ PRIMARY CHAT ============
 
