@@ -419,7 +419,7 @@ Respond ONLY in this JSON format:
 """
     try:
         eval_response = groq_client.chat.completions.create(
-            model="moonshotai/kimi-k2-instruct",
+            model="qwen/qwen3-32b",
             messages=[{"role": "user", "content": eval_prompt}],
             max_tokens=100,
             temperature=0
@@ -448,7 +448,7 @@ def chat_with_groq(messages, system_instruction):
     groq_messages = [{"role": "system", "content": system_instruction}] + messages
 
     response = groq_client.chat.completions.create(
-        model="moonshotai/kimi-k2-instruct",
+        model="qwen/qwen3-32b",
         messages=groq_messages,
         tools=GROQ_TOOLS,
         tool_choice="auto",
@@ -494,7 +494,7 @@ def chat_with_groq(messages, system_instruction):
             })
 
         final_response = groq_client.chat.completions.create(
-            model="moonshotai/kimi-k2-instruct",
+            model="qwen/qwen3-32b",
             messages=groq_messages,
             max_tokens=1000,
             temperature=0.7
