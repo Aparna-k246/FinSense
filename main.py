@@ -21,7 +21,7 @@ supabase = create_client(
     os.getenv("SUPABASE_KEY")
 )
 
-# ============ SEARCH CACHE ============
+# ============ CACHE ============
 
 search_cache = {}
 response_cache = {}
@@ -100,7 +100,6 @@ def search_financial_info(query: str) -> dict:
         if time.time() - cache_time < 3600:
             print(f"Search cache hit for: {query}")
             return cache_result
-
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(
@@ -137,6 +136,89 @@ def execute_tool(tool_name: str, tool_args: dict) -> dict:
         return {"error": f"Unknown tool: {tool_name}"}
 
 # ============ TOOL DEFINITIONS ============
+
+GROQ_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_sip_returns",
+            "description": "Calculate future value of monthly SIP investment. Use when user asks about SIP returns, investment growth, or corpus from regular investing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "monthly_amount": {"type": "number", "description": "Monthly SIP amount in full rupees. Convert: 1 lakh=100000, 50 lakhs=5000000"},
+                    "years": {"type": "integer", "description": "Investment duration in years"},
+                    "expected_rate": {"type": "number", "description": "Annual return rate as percentage. Default 12 for equity funds"}
+                },
+                "required": ["monthly_amount", "years", "expected_rate"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_emi",
+            "description": "Calculate EMI for any loan. Use when user asks about loan EMI or affordability.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal": {"type": "number", "description": "Loan amount in full rupees. Convert: 50 lakhs=5000000, 1 crore=10000000"},
+                    "annual_rate": {"type": "number", "description": "Annual interest rate as percentage"},
+                    "tenure_months": {"type": "integer", "description": "Loan tenure in months. Convert: 20 years=240"}
+                },
+                "required": ["principal", "annual_rate", "tenure_months"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_emergency_fund",
+            "description": "Check if user has adequate emergency fund. Use before investment advice when user mentions expenses and savings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "monthly_expenses": {"type": "number", "description": "Total monthly expenses in rupees"},
+                    "current_savings": {"type": "number", "description": "Current savings in rupees"}
+                },
+                "required": ["monthly_expenses", "current_savings"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate_fd_returns",
+            "description": "Calculate Fixed Deposit maturity amount. Use when user asks about FD returns or wants to compare FD vs SIP.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal": {"type": "number", "description": "FD amount in full rupees. Convert: 50 lakhs=5000000"},
+                    "annual_rate": {"type": "number", "description": "Annual interest rate. Default 7 for major banks"},
+                    "years": {"type": "integer", "description": "FD duration in years"}
+                },
+                "required": ["principal", "annual_rate", "years"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_financial_info",
+            "description": "Search for current Indian financial information like FD rates, RBI repo rate, loan rates, mutual fund performance. Use when user asks about current or recent financial data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Specific search query. Example: 'SBI FD rates 2025'"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    }
+]
 
 GEMINI_TOOLS = [
     types.Tool(
@@ -227,8 +309,8 @@ GEMINI_TOOLS = [
             ),
             types.FunctionDeclaration(
                 name="search_financial_info",
-                description="""Search for current Indian financial information that changes frequently. 
-                Use when user asks about current FD rates, RBI repo rate, latest loan rates, 
+                description="""Search for current Indian financial information that changes frequently.
+                Use when user asks about current FD rates, RBI repo rate, latest loan rates,
                 recent SEBI regulations, or any rate or policy that may have changed recently.
                 Do NOT use for general concepts like how SIP works or what is an EMI.""",
                 parameters=types.Schema(
@@ -244,73 +326,6 @@ GEMINI_TOOLS = [
             )
         ]
     )
-]
-
-# Groq tools — NO search tool (Groq/Llama can't handle it reliably)
-GROQ_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "calculate_sip_returns",
-            "description": "Calculate future value of monthly SIP investment.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "monthly_amount": {"type": "number", "description": "Monthly SIP amount in full rupees. Convert: 1 lakh=100000"},
-                    "years": {"type": "integer", "description": "Investment duration in years"},
-                    "expected_rate": {"type": "number", "description": "Annual return rate as percentage. Default 12 for equity funds"}
-                },
-                "required": ["monthly_amount", "years", "expected_rate"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calculate_emi",
-            "description": "Calculate EMI for any loan.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "principal": {"type": "number", "description": "Loan amount in full rupees. Convert: 50 lakhs=5000000, 1 crore=10000000"},
-                    "annual_rate": {"type": "number", "description": "Annual interest rate as percentage"},
-                    "tenure_months": {"type": "integer", "description": "Loan tenure in months. Convert: 20 years=240"}
-                },
-                "required": ["principal", "annual_rate", "tenure_months"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_emergency_fund",
-            "description": "Check if user has adequate emergency fund.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "monthly_expenses": {"type": "number", "description": "Total monthly expenses in rupees"},
-                    "current_savings": {"type": "number", "description": "Current savings in rupees"}
-                },
-                "required": ["monthly_expenses", "current_savings"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "calculate_fd_returns",
-            "description": "Calculate Fixed Deposit maturity amount.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "principal": {"type": "number", "description": "FD amount in full rupees. Convert: 50 lakhs=5000000"},
-                    "annual_rate": {"type": "number", "description": "Annual interest rate. Default 7 for major banks"},
-                    "years": {"type": "integer", "description": "FD duration in years"}
-                },
-                "required": ["principal", "annual_rate", "years"]
-            }
-        }
-    }
 ]
 
 # ============ SYSTEM PROMPT ============
@@ -350,7 +365,7 @@ ALWAYS use tools for calculations — never estimate manually:
 - calculate_sip_returns: for ANY SIP or investment growth question
 - calculate_fd_returns: for ANY fixed deposit question
 - check_emergency_fund: when user mentions savings and expenses
-- search_financial_info: when user asks about CURRENT rates, 
+- search_financial_info: when user asks about CURRENT rates,
   recent policy changes, or any frequently changing information
 """
 
@@ -403,11 +418,13 @@ Respond ONLY in this JSON format:
 {{"specificity": 7, "actionability": 8, "safety": 10}}
 """
     try:
-        eval_response = gemini.models.generate_content(
-            model="gemini-2.0-flash-lite",
-            contents=eval_prompt
+        eval_response = groq_client.chat.completions.create(
+            model="moonshotai/kimi-k2-instruct",
+            messages=[{"role": "user", "content": eval_prompt}],
+            max_tokens=100,
+            temperature=0
         )
-        scores = json.loads(eval_response.text.strip())
+        scores = json.loads(eval_response.choices[0].message.content.strip())
         specificity = scores.get("specificity", 5)
         actionability = scores.get("actionability", 5)
         safety = scores.get("safety", 5)
@@ -425,7 +442,68 @@ Respond ONLY in this JSON format:
     except Exception as e:
         print(f"Evaluation error: {e}")
 
-# ============ GEMINI CHAT ============
+# ============ GROQ PRIMARY CHAT ============
+
+def chat_with_groq(messages, system_instruction):
+    groq_messages = [{"role": "system", "content": system_instruction}] + messages
+
+    response = groq_client.chat.completions.create(
+        model="moonshotai/kimi-k2-instruct",
+        messages=groq_messages,
+        tools=GROQ_TOOLS,
+        tool_choice="auto",
+        max_tokens=1000,
+        temperature=0.7
+    )
+
+    response_message = response.choices[0].message
+
+    if response_message.tool_calls:
+        groq_messages.append({
+            "role": "assistant",
+            "content": response_message.content or "",
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                }
+                for tc in response_message.tool_calls
+            ]
+        })
+
+        for tool_call in response_message.tool_calls:
+            tool_name = tool_call.function.name
+            try:
+                tool_args = json.loads(tool_call.function.arguments)
+            except json.JSONDecodeError:
+                print(f"Groq malformed tool args: {tool_call.function.arguments}")
+                continue
+
+            print(f"Groq tool called: {tool_name} with args: {tool_args}")
+            tool_result = execute_tool(tool_name, tool_args)
+            print(f"Tool result: {tool_result}")
+
+            groq_messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": json.dumps(tool_result)
+            })
+
+        final_response = groq_client.chat.completions.create(
+            model="moonshotai/kimi-k2-instruct",
+            messages=groq_messages,
+            max_tokens=1000,
+            temperature=0.7
+        )
+        return final_response.choices[0].message.content
+    else:
+        return response_message.content
+
+# ============ GEMINI FALLBACK CHAT ============
 
 def chat_with_gemini(contents, system_instruction):
     response = gemini.models.generate_content(
@@ -481,73 +559,6 @@ def chat_with_gemini(contents, system_instruction):
             break
 
     return reply
-
-# ============ GROQ FALLBACK CHAT ============
-
-def chat_with_groq(messages, system_instruction):
-    groq_system = system_instruction + """
-
-NOTE: You are in fallback mode. For questions about current rates 
-or recent information, give your best general answer and recommend 
-the user verify current rates directly with their bank or RBI website.
-"""
-    groq_messages = [{"role": "system", "content": groq_system}] + messages
-
-    response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=groq_messages,
-        tools=GROQ_TOOLS,
-        tool_choice="auto",
-        max_tokens=1000,
-        temperature=0.7
-    )
-
-    response_message = response.choices[0].message
-
-    if response_message.tool_calls:
-        groq_messages.append({
-            "role": "assistant",
-            "content": response_message.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
-                    }
-                }
-                for tc in response_message.tool_calls
-            ]
-        })
-
-        for tool_call in response_message.tool_calls:
-            tool_name = tool_call.function.name
-            try:
-                tool_args = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError:
-                print(f"Groq malformed tool args: {tool_call.function.arguments}")
-                continue
-
-            print(f"Groq fallback tool called: {tool_name} with args: {tool_args}")
-            tool_result = execute_tool(tool_name, tool_args)
-            print(f"Tool result: {tool_result}")
-
-            groq_messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps(tool_result)
-            })
-
-        final_response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=groq_messages,
-            max_tokens=1000,
-            temperature=0.7
-        )
-        return final_response.choices[0].message.content
-    else:
-        return response_message.content
 
 # ============ ROUTES ============
 
@@ -613,17 +624,18 @@ Do not ask for information you already have.
         "content": request.message
     })
 
+    # Groq primary, Gemini fallback
     reply = ""
     try:
-        reply = chat_with_gemini(gemini_contents, system_instruction)
-        print("Response from: Gemini")
+        reply = chat_with_groq(groq_messages, system_instruction)
+        print("Response from: Groq primary")
     except Exception as e:
-        print(f"Gemini failed: {e}, falling back to Groq")
+        print(f"Groq failed: {e}, falling back to Gemini")
         try:
-            reply = chat_with_groq(groq_messages, system_instruction)
-            print("Response from: Groq fallback")
+            reply = chat_with_gemini(gemini_contents, system_instruction)
+            print("Response from: Gemini fallback")
         except Exception as e2:
-            print(f"Groq also failed: {e2}")
+            print(f"Gemini also failed: {e2}")
             reply = "I'm having trouble connecting right now. Please try again in a moment."
 
     # Cache the response
