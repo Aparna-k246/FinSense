@@ -8,6 +8,7 @@ from groq import Groq
 from duckduckgo_search import DDGS
 import os
 import json
+import time
 
 load_dotenv()
 
@@ -19,6 +20,11 @@ supabase = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
 )
+
+# ============ SEARCH CACHE ============
+
+search_cache = {}
+response_cache = {}
 
 # ============ FINANCIAL TOOLS ============
 
@@ -86,6 +92,36 @@ def calculate_fd_returns(principal: float, annual_rate: float, years: int) -> di
         "total_interest": round(total_interest, 2)
     }
 
+def search_financial_info(query: str) -> dict:
+    """Search for current Indian financial information with 1 hour cache"""
+    cache_key = query.lower().strip()
+    if cache_key in search_cache:
+        cache_time, cache_result = search_cache[cache_key]
+        if time.time() - cache_time < 3600:
+            print(f"Search cache hit for: {query}")
+            return cache_result
+
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(
+                query + " India 2025",
+                max_results=3
+            ))
+        result = {
+            "results": [
+                {
+                    "title": r["title"],
+                    "content": r["body"][:500],
+                    "url": r["href"]
+                }
+                for r in results
+            ]
+        }
+        search_cache[cache_key] = (time.time(), result)
+        return result
+    except Exception as e:
+        return {"error": str(e), "results": []}
+
 def execute_tool(tool_name: str, tool_args: dict) -> dict:
     if tool_name == "calculate_sip_returns":
         return calculate_sip_returns(**tool_args)
@@ -99,27 +135,6 @@ def execute_tool(tool_name: str, tool_args: dict) -> dict:
         return search_financial_info(**tool_args)
     else:
         return {"error": f"Unknown tool: {tool_name}"}
-    
-def search_financial_info(query: str) -> dict:
-    """Search for current Indian financial information"""
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(
-                query + " India 2025",
-                max_results=3
-            ))
-        return {
-            "results": [
-                {
-                    "title": r["title"],
-                    "content": r["body"][:500],
-                    "url": r["href"]
-                }
-                for r in results
-            ]
-        }
-    except Exception as e:
-        return {"error": str(e), "results": []}
 
 # ============ TOOL DEFINITIONS ============
 
@@ -212,29 +227,26 @@ GEMINI_TOOLS = [
             ),
             types.FunctionDeclaration(
                 name="search_financial_info",
-                description="""Search for current Indian financial information that changes frequently. Use this when user asks about:
-                - Current FD rates from specific banks
-                - Current RBI repo rate or monetary policy
-                - Latest mutual fund NAV or performance
-                - Current home loan or personal loan rates
-                - Recent SEBI regulations or changes
-                - Any financial rate or policy that may have changed recently
+                description="""Search for current Indian financial information that changes frequently. 
+                Use when user asks about current FD rates, RBI repo rate, latest loan rates, 
+                recent SEBI regulations, or any rate or policy that may have changed recently.
                 Do NOT use for general concepts like how SIP works or what is an EMI.""",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     properties={
                         "query": types.Schema(
                             type=types.Type.STRING,
-                            description="Search query for current Indian financial information. Be specific: 'SBI FD rates 2025' not just 'FD rates'"
-                            )
-                        },
-                        required=["query"]
-                    )
-                ),
+                            description="Specific search query. Example: 'SBI FD rates 2025' not just 'FD rates'"
+                        )
+                    },
+                    required=["query"]
+                )
+            )
         ]
     )
 ]
 
+# Groq tools — NO search tool (Groq/Llama can't handle it reliably)
 GROQ_TOOLS = [
     {
         "type": "function",
@@ -298,24 +310,7 @@ GROQ_TOOLS = [
                 "required": ["principal", "annual_rate", "years"]
             }
         }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_financial_info",
-            "description": "Search for current Indian financial information like FD rates, RBI repo rate, loan rates, mutual fund performance.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                    "type": "string",
-                    "description": "Search query for current Indian financial information"
-                }
-            },
-            "required": ["query"]
-        }
     }
-},
 ]
 
 # ============ SYSTEM PROMPT ============
@@ -355,11 +350,8 @@ ALWAYS use tools for calculations — never estimate manually:
 - calculate_sip_returns: for ANY SIP or investment growth question
 - calculate_fd_returns: for ANY fixed deposit question
 - check_emergency_fund: when user mentions savings and expenses
-
 - search_financial_info: when user asks about CURRENT rates, 
-  recent policy changes, or any information that changes 
-  frequently. Always search before answering questions about 
-  current FD rates, repo rates, or loan rates.
+  recent policy changes, or any frequently changing information
 """
 
 # ============ DATABASE FUNCTIONS ============
@@ -493,7 +485,13 @@ def chat_with_gemini(contents, system_instruction):
 # ============ GROQ FALLBACK CHAT ============
 
 def chat_with_groq(messages, system_instruction):
-    groq_messages = [{"role": "system", "content": system_instruction}] + messages
+    groq_system = system_instruction + """
+
+NOTE: You are in fallback mode. For questions about current rates 
+or recent information, give your best general answer and recommend 
+the user verify current rates directly with their bank or RBI website.
+"""
+    groq_messages = [{"role": "system", "content": groq_system}] + messages
 
     response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -530,21 +528,26 @@ def chat_with_groq(messages, system_instruction):
             except json.JSONDecodeError:
                 print(f"Groq malformed tool args: {tool_call.function.arguments}")
                 continue
+
             print(f"Groq fallback tool called: {tool_name} with args: {tool_args}")
             tool_result = execute_tool(tool_name, tool_args)
             print(f"Tool result: {tool_result}")
+
             groq_messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call.id,
                 "content": json.dumps(tool_result)
-                })
-            final_response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=groq_messages,
-                max_tokens=1000,
-                temperature=0.7
-                )
-            return final_response.choices[0].message.content
+            })
+
+        final_response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=groq_messages,
+            max_tokens=1000,
+            temperature=0.7
+        )
+        return final_response.choices[0].message.content
+    else:
+        return response_message.content
 
 # ============ ROUTES ============
 
@@ -559,6 +562,14 @@ def test_tool():
 
 @app.post("/chat")
 def chat(request: ChatRequest):
+    # Check response cache first
+    cache_key = f"{request.user_id}:{request.message.lower().strip()}"
+    if cache_key in response_cache:
+        cache_time, cached_reply = response_cache[cache_key]
+        if time.time() - cache_time < 1800:
+            print("Response cache hit")
+            return {"reply": cached_reply, "user_id": request.user_id}
+
     profile = get_user_profile(request.user_id)
     history = get_conversation_history(request.user_id)
 
@@ -579,7 +590,6 @@ Do not ask for information you already have.
 
     system_instruction = SYSTEM_PROMPT + profile_context
 
-    # Build conversation history
     gemini_contents = []
     groq_messages = []
 
@@ -603,7 +613,6 @@ Do not ask for information you already have.
         "content": request.message
     })
 
-    # Try Gemini first, fall back to Groq
     reply = ""
     try:
         reply = chat_with_gemini(gemini_contents, system_instruction)
@@ -616,6 +625,9 @@ Do not ask for information you already have.
         except Exception as e2:
             print(f"Groq also failed: {e2}")
             reply = "I'm having trouble connecting right now. Please try again in a moment."
+
+    # Cache the response
+    response_cache[cache_key] = (time.time(), reply)
 
     save_message(request.user_id, "user", request.message)
     save_message(request.user_id, "assistant", reply)
