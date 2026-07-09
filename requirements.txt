@@ -6,6 +6,8 @@ python-dotenv
 groq
 gotrue
 google-genai
+duckduckgo-search
 sentence-transformers
 numpy
-duckduckgo-search
+requests
+streamlit
