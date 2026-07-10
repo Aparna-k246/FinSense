@@ -94,7 +94,6 @@ def calculate_fd_returns(principal: float, annual_rate: float, years: int) -> di
     }
 
 def search_financial_info(query: str) -> dict:
-    """Search for current Indian financial information with 1 hour cache"""
     cache_key = query.lower().strip()
     if cache_key in search_cache:
         cache_time, cache_result = search_cache[cache_key]
@@ -210,7 +209,7 @@ GROQ_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_financial_info",
-            "description": "Search for current Indian financial information like FD rates, RBI repo rate, loan rates, mutual fund performance. Use when user asks about current or recent financial data.",
+            "description": "Search for current Indian financial information like FD rates, RBI repo rate, loan rates. Use when user asks about current or recent financial data.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -384,7 +383,6 @@ def save_message(user_id: str, role: str, content: str):
 # ============ CLEAN RESPONSE ============
 
 def clean_response(text: str) -> str:
-    """Remove thinking tags from reasoning models"""
     if text is None:
         return ""
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
@@ -393,7 +391,6 @@ def clean_response(text: str) -> str:
 # ============ PROFILE EXTRACTION ============
 
 def extract_and_update_profile(user_id: str, user_message: str, assistant_reply: str):
-    """Extract financial details from conversation and update user profile"""
     extraction_prompt = f"""
 Extract any financial information mentioned in this conversation.
 Pay special attention to UPDATES — if the user says their salary
@@ -654,8 +651,18 @@ def test_tool():
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    cache_key = f"{request.user_id}:{request.message.lower().strip()}"
-    if cache_key in response_cache:
+    # Smart cache — skip for personal/profile questions
+    personal_keywords = [
+        "remember", "my salary", "my income", "my expenses",
+        "my emi", "my savings", "my profile", "my goal",
+        "what do you know", "updated", "changed", "increased",
+        "decreased", "now earning", "got hike", "appraisal"
+    ]
+    message_lower = request.message.lower()
+    should_cache = not any(kw in message_lower for kw in personal_keywords)
+
+    cache_key = f"{request.user_id}:{message_lower.strip()}"
+    if should_cache and cache_key in response_cache:
         cache_time, cached_reply = response_cache[cache_key]
         if time.time() - cache_time < 1800:
             print("Response cache hit")
@@ -718,7 +725,8 @@ Do not ask for information already in this profile.
             print(f"Gemini also failed: {e2}")
             reply = "I'm having trouble connecting right now. Please try again in a moment."
 
-    response_cache[cache_key] = (time.time(), reply)
+    if should_cache:
+        response_cache[cache_key] = (time.time(), reply)
 
     save_message(request.user_id, "user", request.message)
     save_message(request.user_id, "assistant", reply)
