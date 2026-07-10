@@ -281,7 +281,7 @@ GEMINI_TOOLS = [
             ),
             types.FunctionDeclaration(
                 name="search_financial_info",
-                description="Search for current Indian financial information that changes frequently. Use when user asks about current FD rates, RBI repo rate, latest loan rates, or recent regulations.",
+                description="Search for current Indian financial information that changes frequently.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     properties={
@@ -363,7 +363,7 @@ def get_user_profile(user_id: str):
         return result.data[0]
     return None
 
-def get_conversation_history(user_id: str, limit: int = 10):
+def get_conversation_history(user_id: str, limit: int = 6):
     result = supabase.table("conversation_history")\
         .select("role, content")\
         .eq("user_id", user_id)\
@@ -396,24 +396,31 @@ def extract_and_update_profile(user_id: str, user_message: str, assistant_reply:
     """Extract financial details from conversation and update user profile"""
     extraction_prompt = f"""
 Extract any financial information mentioned in this conversation.
-Return ONLY a JSON object with the fields that were mentioned.
-If a field was not mentioned, do not include it.
+Pay special attention to UPDATES — if the user says their salary
+"increased", "changed", "is now", or gives a new amount,
+extract the NEW value, not the old one.
 
 User message: {user_message}
 Assistant reply: {assistant_reply}
 
 Extract these fields if mentioned:
-- monthly_income: number (monthly salary or income in rupees)
+- monthly_income: number (monthly salary in rupees.
+  If user says salary increased to X, use X)
 - fixed_expenses: number (monthly fixed expenses in rupees)
-- emi_amount: number (monthly EMI payments in rupees)
+- emi_amount: number (monthly EMI in rupees)
 - existing_investments: string (SIP, FD, PPF etc)
 - financial_goals: string (house, car, retirement etc)
 - biggest_worry: string (debt, savings, investment etc)
 
-Return ONLY valid JSON like this example:
-{{"monthly_income": 60000, "financial_goals": "buy a house"}}
+IMPORTANT:
+- 2 lakhs = 200000
+- 1 lakh = 100000
+- Always convert to full rupee amounts
 
-If nothing financial was mentioned, return empty JSON: {{}}
+Return ONLY valid JSON with mentioned fields:
+{{"monthly_income": 200000}}
+
+If nothing financial was mentioned, return: {{}}
 """
     try:
         extraction_response = groq_client.chat.completions.create(
@@ -655,12 +662,12 @@ def chat(request: ChatRequest):
             return {"reply": cached_reply, "user_id": request.user_id}
 
     profile = get_user_profile(request.user_id)
-    history = get_conversation_history(request.user_id)
+    history = get_conversation_history(request.user_id, limit=6)
 
     profile_context = ""
     if profile:
         profile_context = f"""
-Known information about this user:
+CURRENT USER PROFILE (always use these as the source of truth):
 - Monthly income: {profile.get('monthly_income', 'not provided')}
 - Fixed expenses: {profile.get('fixed_expenses', 'not provided')}
 - EMI amount: {profile.get('emi_amount', 'not provided')}
@@ -668,8 +675,9 @@ Known information about this user:
 - Financial goals: {profile.get('financial_goals', 'not provided')}
 - Biggest worry: {profile.get('biggest_worry', 'not provided')}
 
-Use this context for personalised advice.
-Do not ask for information you already have.
+If the user mentions an update to any of these values in this
+conversation, use the NEW value they mentioned, not the above.
+Do not ask for information already in this profile.
 """
 
     system_instruction = SYSTEM_PROMPT + profile_context
