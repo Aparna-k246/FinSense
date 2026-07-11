@@ -173,6 +173,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "profile" not in st.session_state:
     st.session_state.profile = None
+if "history_loaded" not in st.session_state:
+    st.session_state.history_loaded = False
 
 # ============ AUTH PAGE ============
 
@@ -220,6 +222,7 @@ def show_auth_page():
                         })
                         st.session_state.user = response.user
                         st.session_state.messages = []
+                        st.session_state.history_loaded = False
                         st.rerun()
                     except Exception as e:
                         error_msg = str(e).lower()
@@ -272,7 +275,7 @@ def show_auth_page():
         </div>
         """, unsafe_allow_html=True)
 
-# ============ PROFILE FETCH ============
+# ============ HELPERS ============
 
 def fetch_profile(user_id: str):
     try:
@@ -286,13 +289,34 @@ def fetch_profile(user_id: str):
         pass
     return None
 
+def load_chat_history(user_id: str):
+    try:
+        response = requests.get(
+            f"{BACKEND_URL}/history/{user_id}", timeout=10)
+        if response.status_code == 200:
+            return response.json().get("history", [])
+    except Exception:
+        pass
+    return []
+
 # ============ CHAT PAGE ============
 
 def show_chat_page():
     user = st.session_state.user
 
+    # Load profile
     if st.session_state.profile is None:
         st.session_state.profile = fetch_profile(user.id)
+
+    # Load chat history on first login
+    if not st.session_state.history_loaded:
+        stored_history = load_chat_history(user.id)
+        if stored_history:
+            st.session_state.messages = [
+                {"role": turn["role"], "content": turn["content"]}
+                for turn in stored_history
+            ]
+        st.session_state.history_loaded = True
 
     profile = st.session_state.profile
 
@@ -352,24 +376,22 @@ def show_chat_page():
             </div>
             """, unsafe_allow_html=True)
 
-        st.markdown("<div style='height:12px'></div>",
-                    unsafe_allow_html=True)
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
         if st.button("Clear conversation", use_container_width=True,
                      key="clear_btn"):
             st.session_state.messages = []
             st.rerun()
 
-        st.markdown("<div style='height:8px'></div>",
-                    unsafe_allow_html=True)
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
         st.markdown('<div class="logout-btn">', unsafe_allow_html=True)
-        if st.button("Sign out", use_container_width=True,
-                     key="logout_btn"):
+        if st.button("Sign out", use_container_width=True, key="logout_btn"):
             supabase.auth.sign_out()
             st.session_state.user = None
             st.session_state.messages = []
             st.session_state.profile = None
+            st.session_state.history_loaded = False
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -390,8 +412,7 @@ def show_chat_page():
             font-size:1.6rem; color:#FFFFFF;">
                 Fin<span style="color:#4ADE80;">Sense</span>
             </span>
-            <span style="margin-left:10px; font-size:0.75rem;
-            color:#4ADE80;">
+            <span style="margin-left:10px; font-size:0.75rem; color:#4ADE80;">
                 <span class="status-dot"></span>Active
             </span>
         </div>
@@ -401,7 +422,7 @@ def show_chat_page():
     <hr style="border-color:rgba(255,255,255,0.06); margin:0 0 16px;">
     """, unsafe_allow_html=True)
 
-    # ── Empty state ──
+    # ── Empty state with suggestions ──
     if not st.session_state.messages:
         st.markdown("""
         <div style="text-align:center; padding:40px 24px 24px;">

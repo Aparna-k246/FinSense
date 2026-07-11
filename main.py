@@ -362,7 +362,7 @@ def get_user_profile(user_id: str):
         return result.data[0]
     return None
 
-def get_conversation_history(user_id: str, limit: int = 6):
+def get_conversation_history(user_id: str, limit: int = 20):
     result = supabase.table("conversation_history")\
         .select("role, content")\
         .eq("user_id", user_id)\
@@ -379,6 +379,55 @@ def save_message(user_id: str, role: str, content: str):
             "content": content
         })\
         .execute()
+
+def summarize_old_history(user_id: str):
+    """Summarize older conversations and store in profile"""
+    all_history = get_conversation_history(user_id, limit=100)
+    if len(all_history) < 30:
+        return
+
+    old_messages = all_history[:len(all_history) - 20]
+
+    summary_prompt = f"""
+Summarize this financial coaching conversation in 3-4 sentences.
+Focus on: what financial details the user shared, what advice 
+was given, what topics were discussed, what decisions were made.
+
+Conversation:
+{json.dumps(old_messages, indent=2)}
+
+Return a concise summary paragraph only. No preamble.
+"""
+    try:
+        summary_response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": summary_prompt}],
+            max_tokens=300,
+            temperature=0
+        )
+        summary = summary_response.choices[0].message.content.strip()
+
+        existing = supabase.table("user_profiles")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .execute()
+
+        if existing.data:
+            supabase.table("user_profiles")\
+                .update({"conversation_summary": summary})\
+                .eq("user_id", user_id)\
+                .execute()
+        else:
+            supabase.table("user_profiles")\
+                .insert({
+                    "user_id": user_id,
+                    "conversation_summary": summary
+                })\
+                .execute()
+
+        print(f"Conversation summarized for user: {user_id}")
+    except Exception as e:
+        print(f"Summarization error: {e}")
 
 # ============ CLEAN RESPONSE ============
 
@@ -525,7 +574,6 @@ Respond ONLY in this JSON format with no other text:
 def chat_with_groq(messages, system_instruction):
     groq_messages = [{"role": "system", "content": system_instruction}] + messages
 
-    # Use Llama for speed — fast responses prevent Streamlit timeouts
     response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=groq_messages,
@@ -650,14 +698,19 @@ def test_tool():
     result = calculate_emi(5000000, 8.5, 240)
     return result
 
+@app.get("/history/{user_id}")
+def get_history(user_id: str):
+    history = get_conversation_history(user_id, limit=50)
+    return {"history": history}
+
 @app.post("/chat")
 def chat(request: ChatRequest):
-    # Smart cache — skip for personal/profile questions
     personal_keywords = [
         "remember", "my salary", "my income", "my expenses",
         "my emi", "my savings", "my profile", "my goal",
         "what do you know", "updated", "changed", "increased",
-        "decreased", "now earning", "got hike", "appraisal"
+        "decreased", "now earning", "got hike", "appraisal",
+        "discussed", "talked about", "what did we"
     ]
     message_lower = request.message.lower()
     should_cache = not any(kw in message_lower for kw in personal_keywords)
@@ -665,15 +718,16 @@ def chat(request: ChatRequest):
     cache_key = f"{request.user_id}:{message_lower.strip()}"
     if should_cache and cache_key in response_cache:
         cache_time, cached_reply = response_cache[cache_key]
-        if time.time() - cache_time < 1800:
+        if time.time() - cache_time < 300:
             print("Response cache hit")
             return {"reply": cached_reply, "user_id": request.user_id}
 
     profile = get_user_profile(request.user_id)
-    history = get_conversation_history(request.user_id, limit=6)
+    history = get_conversation_history(request.user_id, limit=20)
 
     profile_context = ""
     if profile:
+        summary = profile.get("conversation_summary", "")
         profile_context = f"""
 CURRENT USER PROFILE (always use these as the source of truth):
 - Monthly income: {profile.get('monthly_income', 'not provided')}
@@ -682,6 +736,7 @@ CURRENT USER PROFILE (always use these as the source of truth):
 - Existing investments: {profile.get('existing_investments', 'not provided')}
 - Financial goals: {profile.get('financial_goals', 'not provided')}
 - Biggest worry: {profile.get('biggest_worry', 'not provided')}
+{f"- Previous conversation summary: {summary}" if summary else ""}
 
 If the user mentions an update to any of these values in this
 conversation, use the NEW value they mentioned, not the above.
@@ -733,6 +788,11 @@ Do not ask for information already in this profile.
     save_message(request.user_id, "assistant", reply)
     extract_and_update_profile(request.user_id, request.message, reply)
     evaluate_response(request.message, reply, request.user_id)
+
+    # Summarize old history every 30 messages
+    total_messages = len(history)
+    if total_messages > 0 and total_messages % 30 == 0:
+        summarize_old_history(request.user_id)
 
     return {
         "reply": reply,
