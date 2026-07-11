@@ -525,8 +525,9 @@ Respond ONLY in this JSON format with no other text:
 def chat_with_groq(messages, system_instruction):
     groq_messages = [{"role": "system", "content": system_instruction}] + messages
 
+    # Use Llama for speed — fast responses prevent Streamlit timeouts
     response = groq_client.chat.completions.create(
-        model="qwen/qwen3-32b",
+        model="llama-3.3-70b-versatile",
         messages=groq_messages,
         tools=GROQ_TOOLS,
         tool_choice="auto",
@@ -572,7 +573,7 @@ def chat_with_groq(messages, system_instruction):
             })
 
         final_response = groq_client.chat.completions.create(
-            model="qwen/qwen3-32b",
+            model="llama-3.3-70b-versatile",
             messages=groq_messages,
             max_tokens=1000,
             temperature=0.7

@@ -277,7 +277,7 @@ def show_auth_page():
 def fetch_profile(user_id: str):
     try:
         response = requests.get(
-            f"{BACKEND_URL}/profile/{user_id}", timeout=5)
+            f"{BACKEND_URL}/profile/{user_id}", timeout=10)
         if response.status_code == 200:
             data = response.json()
             if "message" not in data:
@@ -433,15 +433,17 @@ def show_chat_page():
                              use_container_width=True):
                     st.session_state.messages.append(
                         {"role": "user", "content": suggestion})
-                    with st.spinner(""):
+                    with st.spinner("FinSense is thinking..."):
                         try:
                             resp = requests.post(
                                 f"{BACKEND_URL}/chat",
                                 json={"user_id": user.id,
                                       "message": suggestion},
-                                timeout=30
+                                timeout=60
                             )
                             reply = resp.json()["reply"]
+                        except requests.exceptions.Timeout:
+                            reply = "Taking longer than expected. Please try again."
                         except Exception:
                             reply = "Something went wrong. Please try again."
                     st.session_state.messages.append(
@@ -456,15 +458,17 @@ def show_chat_page():
                              use_container_width=True):
                     st.session_state.messages.append(
                         {"role": "user", "content": suggestion})
-                    with st.spinner(""):
+                    with st.spinner("FinSense is thinking..."):
                         try:
                             resp = requests.post(
                                 f"{BACKEND_URL}/chat",
                                 json={"user_id": user.id,
                                       "message": suggestion},
-                                timeout=30
+                                timeout=60
                             )
                             reply = resp.json()["reply"]
+                        except requests.exceptions.Timeout:
+                            reply = "Taking longer than expected. Please try again."
                         except Exception:
                             reply = "Something went wrong. Please try again."
                     st.session_state.messages.append(
@@ -485,14 +489,16 @@ def show_chat_page():
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner(""):
+            with st.spinner("FinSense is thinking..."):
                 try:
                     response = requests.post(
                         f"{BACKEND_URL}/chat",
                         json={"user_id": user.id, "message": prompt},
-                        timeout=30
+                        timeout=60
                     )
                     reply = response.json()["reply"]
+                except requests.exceptions.Timeout:
+                    reply = "Taking longer than expected. Please try again."
                 except Exception:
                     reply = "Something went wrong. Please try again."
             st.markdown(reply)
